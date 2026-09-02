@@ -183,21 +183,48 @@ the largest instance in the set, and it is what the diagnosis would predict: if
 the right step is proportional to `1/n`, then a constant fitted at eighty
 customers is too large at a hundred and fifty.
 
-### The scaling law
+### A scaling law that did not survive testing
 
-Written out, the step in one dimension is `beta * |mbest - x| * ln(1/u)`. With
-canonical rank keys the mean best position sits mid-range in every dimension, so
-`|mbest - x|` is about 0.29 regardless of the instance, and `ln(1/u)` averages
-one. The step is therefore about `0.29 * beta`, while the smallest meaningful
-change to an ordering is `1/n`. Requiring the two to be comparable gives
+The residual weakness on the largest instance suggested a sharper hypothesis.
+The step in one dimension is `beta * |mbest - x| * ln(1/u)`. With canonical rank
+keys the mean best position sits mid-range in every dimension, so `|mbest - x|`
+is about 0.29 regardless of the instance and `ln(1/u)` averages one; the step is
+therefore about `0.29 * beta`, while the smallest meaningful change to an
+ordering is `1/n`. Requiring the two to be comparable gives
 
-    beta  ~  c / n
+    beta  ~  c / n,      c = 1.16 from the measured optimum at n = 80
 
-with the constant fixed by the measured optimum at eighty customers, `c = 1.16`.
-This is available as `beta_scaling="rank"` and is derived from the geometry of
-the representation rather than fitted per instance.
+which predicts that a single constant fitted at eighty customers is too large at
+a hundred and fifty, and that scaling it should recover the lost ground.
 
----
+**It did not.** Tested over eleven instances up to two hundred customers, eight
+seeds each:
+
+| Variant | Mean gap | Median gap |
+| --- | --- | --- |
+| Multi-start + local search | 1.14% | 0.91% |
+| QPSO, classical coefficient 1.0 | 1.53% | 1.01% |
+| QPSO, fixed coefficient 0.05 | 1.24% | 0.60% |
+| QPSO, derived `1.16/n` law | 1.27% | 0.59% |
+
+The derived law is statistically indistinguishable from simply using the
+constant everywhere (p = 0.42 over 88 paired runs), and on X-n153-k22, the
+instance that motivated it, it scores 5.05% against the constant's 5.16% and the
+control's 1.70%. The hypothesis is not supported.
+
+What that instance is actually short of is iterations, not step size. At 3,000
+evaluations a swarm of thirty gets a hundred iterations, while the multi-start
+control gets three thousand independent samples; on a large instance the
+control's coverage wins regardless of how the swarm is tuned.
+
+Both results are reported because the second is the more useful one. The
+correction that works, reducing the coefficient, is confirmed twice at
+p = 0.00013. The elegant explanation for why it should be size-dependent is
+wrong, and pretending otherwise would have put an unsupported formula into the
+method description.
+
+The default is therefore the fixed constant. The derived law remains available
+as an option, documented as unsupported.
 
 ## 6. What this means for the claims made
 
@@ -211,13 +238,16 @@ Supported by measurement:
 * The quantum-inspired update rule is a strong optimiser on its own: 1.25%
   against 146.6% for random sampling at equal evaluations.
 * The classical contraction range is wrong for a random-key encoding, and
-  correcting it is a significant improvement (p = 0.00015).
+  correcting it is a significant improvement, confirmed twice at p = 0.00013
+  over 80 and 88 paired runs.
 
 Not supported, and therefore not claimed:
 
 * That QPSO beats every classical metaheuristic. It does not: the genetic
   algorithm and ant colony optimisation are both better on these instances.
 * That the corrected version beats multi-start local search. It ties with it.
+* That the correct coefficient scales with instance size. That was predicted
+  and tested, and the prediction failed.
 * Any claim of quantum advantage, or of quantum hardware being involved.
 
 ---

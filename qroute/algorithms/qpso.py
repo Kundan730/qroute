@@ -76,8 +76,14 @@ claim of tuned superiority. The comparison that does matter is against the
 same pipeline driven by other search rules, which is why every baseline shares
 this decoder.
 
-The classical schedule from Sun et al., beta falling linearly from 1.0 to 0.5,
-was the best of the five schedules tested, so the literature default stands.
+The contraction coefficient turned out to be the exception, and it took a
+diagnosis rather than a sweep to find it. See :doc:`the findings document
+<findings>`: under a random-key encoding the classical range of 0.5 to 1.0 makes
+the sampling step roughly twenty times larger than the one-rank differences it
+is supposed to refine, and reducing it to 0.05 is a significant improvement
+(p = 0.00015 over 80 paired runs). That is the default here, and it is the one
+parameter in this class whose standard value is wrong for this representation.
+
 Mutation was very slightly worse than none, so it is off by default and kept as
 an option.
 """
@@ -98,8 +104,8 @@ class QPSO(Optimizer):
 
     def __init__(self, instance, stop=None, seed=None, callback=None,
                  swarm_size: int = 30,
-                 beta_start: float = 1.0,
-                 beta_end: float = 0.5,
+                 beta_start: float = 0.05,
+                 beta_end: float = 0.025,
                  beta_schedule: str = "linear",
                  beta_scaling: str = "fixed",
                  weighted_mbest: bool = True,
@@ -183,6 +189,16 @@ class QPSO(Optimizer):
             # rather than randomises therefore needs beta proportional to 1/n.
             # The constant is fixed by the measured optimum on instances of
             # about eighty customers, where beta = 0.05 was best.
+            #
+            # Measured outcome: this derivation is *not* better than simply
+            # using that constant everywhere. Over eleven instances and eight
+            # seeds the two are statistically indistinguishable (p = 0.42), and
+            # the large instance that motivated the idea, X-n153-k22, is no
+            # better under it (5.05% against 5.16%). The weakness there is a
+            # shortage of iterations rather than a step-size error. The option
+            # is kept because it is a clean statement of the geometry and costs
+            # nothing, but the default is the fixed constant, because that is
+            # what the evidence supports.
             scale = (0.05 * 80.0) / max(self.n, 1) / max(self.beta_start, 1e-9)
         frac = 0.0
         if np.isfinite(self.stop.max_seconds) and self.stop.max_seconds > 0:
