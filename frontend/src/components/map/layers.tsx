@@ -39,8 +39,13 @@ export function EdgeLayer({
 }) {
   const map = useMap();
   const renderer = useCanvasRenderer();
+  // Held in a ref so that changing the click handler does not force several
+  // thousand polylines to be rebuilt; written in an effect, because mutating a
+  // ref during render is not safe under concurrent rendering.
   const selectRef = useRef(onSelect);
-  selectRef.current = onSelect;
+  useEffect(() => {
+    selectRef.current = onSelect;
+  }, [onSelect]);
 
   useEffect(() => {
     if (!edges || !visible) return undefined;

@@ -299,6 +299,29 @@ def test_report_rejects_a_directory_without_results(tmp_path: Path):
     assert invoke("report", str(tmp_path)).exit_code == 1
 
 
+def test_summarise_survives_a_run_that_found_no_solution():
+    """The runner's own summariser raises on an infinite cost; ours must not."""
+    from qroute.cli.main import _summarise
+
+    rows = [
+        {"instance": "R101", "algorithm": "ortools", "seed": 1, "cost": float("inf"),
+         "gap": float("inf"), "bks": 1637.7, "n_routes": 0, "feasible": True,
+         "iterations": 1, "evaluations": 0, "seconds": 3.0, "status": "ok"},
+        {"instance": "R101", "algorithm": "qpso", "seed": 1, "cost": 1700.0,
+         "gap": 3.8, "bks": 1637.7, "n_routes": 19, "feasible": True,
+         "iterations": 10, "evaluations": 100, "seconds": 3.0, "status": "ok"},
+    ]
+    summary = _summarise(rows)
+    assert summary["degraded"] is True
+    assert summary["cells"]["R101|ortools"]["gap"] is None
+    assert summary["cells"]["R101|qpso"]["gap"]["median"] == pytest.approx(3.8)
+    assert summary["omnibus"] is None
+    # And it must still render without raising.
+    render.summary_table(summary)
+    render.cell_table(summary)
+    assert "R101" in render.markdown_report(summary)
+
+
 # ---------------------------------------------------------------------------
 # Configuration files
 # ---------------------------------------------------------------------------
@@ -443,6 +466,8 @@ def test_format_gap_and_numbers_never_print_nan():
     assert str(render.format_gap(None)) == "-"
     assert str(render.format_gap(float("inf"))) == "-"
     assert str(render.format_gap(1.5)) == "+1.50%"
+    # Floating-point residue on a matched optimum must not read as "-0.00%".
+    assert str(render.format_gap(-1e-14)) == "+0.00%"
     assert render.format_number(float("nan")) == "-"
     assert render.format_number(1234.5) == "1,234.50"
     assert render.format_seconds(0.25) == "250 ms"

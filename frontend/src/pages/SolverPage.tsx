@@ -12,7 +12,7 @@
  * says so.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { InstanceSummary, RunRequest } from '../api/types';
 import { ConvergenceChart, DiversityChart } from '../components/charts';
 import { Badge, Field, KeyValue, Notice, Panel, RailSection, Stat, StatGrid } from '../components/ui';
@@ -32,37 +32,40 @@ export function SolverPage() {
   const instances = useAppStore((s) => s.instances);
   const run = useRunStore();
 
-  const [algorithm, setAlgorithm] = useState('qpso');
-  const [instanceName, setInstanceName] = useState('');
+  const [chosenAlgorithm, setAlgorithm] = useState('qpso');
+  const [chosenInstance, setInstanceName] = useState('');
   const [seed, setSeed] = useState(20260920);
   const [maxSeconds, setMaxSeconds] = useState(15);
   const [maxIterations, setMaxIterations] = useState(100000);
-  const [params, setParams] = useState<Record<string, number | boolean | string>>({});
+  // Overrides are stored with the algorithm they belong to, so a value that is
+  // meaningful to one solver is never silently sent to another when the
+  // selection changes. Deriving this beats resetting it from an effect.
+  const [override, setOverride] = useState<{
+    algorithm: string;
+    values: Record<string, number | boolean | string>;
+  }>({ algorithm: 'qpso', values: {} });
 
   const grouped = useMemo(() => groupInstances(instances), [instances]);
 
-  useEffect(() => {
-    if (algorithms.length > 0 && !algorithms.some((a) => a.name === algorithm)) {
-      setAlgorithm(algorithms[0].name);
-    }
-  }, [algorithms, algorithm]);
-
-  useEffect(() => {
-    if (!instanceName && instances.length > 0) {
-      const preferred = instances.find((i) => i.name === 'A-n32-k5') ?? instances[0];
-      setInstanceName(preferred.name);
-    }
-  }, [instances, instanceName]);
+  // The catalogues arrive asynchronously, so the effective selection is derived
+  // from what is actually available rather than corrected afterwards in an
+  // effect, which would render once with a name the backend does not know.
+  const algorithm =
+    algorithms.some((a) => a.name === chosenAlgorithm)
+      ? chosenAlgorithm
+      : (algorithms[0]?.name ?? chosenAlgorithm);
+  const instanceName =
+    instances.some((i) => i.name === chosenInstance)
+      ? chosenInstance
+      : (instances.find((i) => i.name === 'A-n32-k5')?.name ?? instances[0]?.name ?? '');
 
   const selected: InstanceSummary | null =
     instances.find((i) => i.name === instanceName) ?? null;
   const spec = algorithms.find((a) => a.name === algorithm);
+  const params = override.algorithm === algorithm ? override.values : {};
 
-  // Reset the parameter overrides whenever the algorithm changes, so a value
-  // meaningful to one solver is never silently sent to another.
-  useEffect(() => {
-    setParams({});
-  }, [algorithm]);
+  const setParams = (values: Record<string, number | boolean | string>) =>
+    setOverride({ algorithm, values });
 
   const ticks = run.ticks;
   const last = ticks.length > 0 ? ticks[ticks.length - 1] : null;

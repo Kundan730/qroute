@@ -76,9 +76,17 @@ def gap_style(gap: Optional[float]) -> str:
 
 
 def format_gap(gap: Optional[float], digits: int = 2) -> Text:
-    """A gap as coloured text, or a dim dash when there is no reference."""
+    """A gap as coloured text, or a dim dash when there is no reference.
+
+    A gap smaller in magnitude than the printed precision is shown as exactly
+    zero. Floating-point arithmetic on a cost that equals the best known value
+    leaves a residue of order 1e-14, and printing that as "-0.00%" would suggest
+    the published optimum had been beaten.
+    """
     if gap is None or not math.isfinite(gap):
         return Text("-", style="dim")
+    if abs(gap) < 0.5 * 10.0 ** (-digits):
+        gap = 0.0
     return Text(f"{gap:+.{digits}f}%", style=gap_style(gap))
 
 

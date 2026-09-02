@@ -50,14 +50,15 @@ export function MapPage() {
   const map = useMapStore();
   const run = useRunStore();
 
-  const [algorithm, setAlgorithm] = useState('qpso');
+  const [chosenAlgorithm, setAlgorithm] = useState('qpso');
   const [seconds, setSeconds] = useState(10);
 
-  useEffect(() => {
-    if (algorithms.length > 0 && !algorithms.some((a) => a.name === algorithm)) {
-      setAlgorithm(algorithms[0].name);
-    }
-  }, [algorithms, algorithm]);
+  // Derived rather than corrected in an effect, so the form never renders with
+  // an algorithm name the backend does not offer.
+  const algorithm =
+    algorithms.some((a) => a.name === chosenAlgorithm)
+      ? chosenAlgorithm
+      : (algorithms[0]?.name ?? chosenAlgorithm);
 
   // Load the first network as soon as the catalogue arrives, so the page is
   // never an empty grey rectangle waiting for a click.

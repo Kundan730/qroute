@@ -60,8 +60,13 @@ export function SamplingDemo() {
   const [beta, setBeta] = useState(0.75);
   const [running, setRunning] = useState(true);
   const [resetKey, setResetKey] = useState(0);
+  // The animation loop reads beta every step; keeping it in a ref means moving
+  // the slider does not tear down and restart the simulation, which would throw
+  // away the histogram the picture is about.
   const betaRef = useRef(beta);
-  betaRef.current = beta;
+  useEffect(() => {
+    betaRef.current = beta;
+  }, [beta]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
