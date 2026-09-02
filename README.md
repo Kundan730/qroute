@@ -30,15 +30,46 @@ by an optimal split, and refined by granular local search.
   from the instance's own reference file, over multiple seeds with statistical
   tests.
 
-## Status
+## Results
 
-Verified so far:
+1,520 benchmark runs over 17 instances, 9 solvers and 10 seeds, at an equal
+twenty-second budget with every run pinned to one thread. No run returned an
+infeasible solution. Friedman over 16 instances gives p = 1.25e-09.
+
+| Solver | Mean gap to best known | Reached best known |
+| --- | ---: | ---: |
+| PyVRP, hybrid genetic search | 0.24% | 120/170 |
+| **Quantum rotation gate (ours)** | 0.65% | 104/170 |
+| Genetic algorithm | 0.66% | 105/170 |
+| Ant colony optimisation | 0.77% | 100/170 |
+| **Quantum particle swarm (ours)** | 0.85% | 100/170 |
+| Simulated annealing | 0.93% | 81/170 |
+| Classical particle swarm | 0.99% | 80/170 |
+| Random multi-start | 1.21% | 77/170 |
+| OR-Tools guided local search | 2.23% | 60/160 |
+
+The comparison the problem statement asks for is the quantum-behaved swarm
+against the classical one it derives from, under an identical decoder, local
+search and budget. It comes out positive: 0.85% against 0.99%, p = 1.4e-05 over
+170 paired runs. It also beats simulated annealing and multi-start local search.
+
+It does **not** beat the genetic algorithm or ant colony optimisation, and it is
+well behind PyVRP, a specialised state-of-the-art solver. Those results are on
+every table rather than omitted.
+
+Also established:
 
 * 138 CVRPLIB and Solomon reference solutions re-evaluate to their published cost
   exactly, using each family's own distance convention.
 * The route split is provably optimal: 300 random instances agree with brute-force
   enumeration to machine precision.
 * Local search is correct on asymmetric (one-way street) cost matrices.
+* The contraction coefficient standard in the QPSO literature is wrong for a
+  random-key encoding by roughly a factor of twenty; correcting it is significant
+  at p = 1.3e-04, reproduced twice.
+
+The full record, including the negative results and a confound that invalidated
+an earlier version of them, is in [docs/findings.md](docs/findings.md).
 
 ## Layout
 
@@ -53,6 +84,7 @@ Verified so far:
 | `qroute/api` | FastAPI service |
 | `qroute/cli` | command line interface |
 | `frontend/` | React map and dashboard |
+| `docs/` | formulation, algorithms, benchmark protocol, architecture, findings |
 
 ## Install
 

@@ -1,0 +1,516 @@
+<title>qroute Build Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    --ground:   #F2F0EC;
+    --surface:  #FFFFFF;
+    --surface-2:#E9E6E0;
+    --line:     #D3CFC7;
+    --line-soft:#E3DFD8;
+    --ink:      #191B1F;
+    --ink-2:    #4A4F58;
+    --muted:    #767C87;
+    --signal:   #B26A0C;
+    --signal-dim:#F0E2CC;
+    --confirmed:#2F6B45;
+    --bounded:  #8A6D12;
+    --refuted:  #A4432B;
+    --flow-0:  #3C7F55;
+    --flow-1:  #8A9A3C;
+    --flow-2:  #C08A22;
+    --flow-3:  #B9662A;
+    --flow-4:  #9E3B2B;
+    --shadow: 0 1px 2px rgba(25,27,31,.06), 0 8px 24px rgba(25,27,31,.05);
+    --max: 74rem;
+    color-scheme: light dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #101318;
+      --surface:  #171B22;
+      --surface-2:#1F242C;
+      --line:     #2C333D;
+      --line-soft:#232932;
+      --ink:      #E8E5DF;
+      --ink-2:    #B3B8C1;
+      --muted:    #838A96;
+      --signal:   #E8A33D;
+      --signal-dim:#2A2418;
+      --confirmed:#69B583;
+      --bounded:  #D6B34A;
+      --refuted:  #DC7A5E;
+      --flow-0:  #5FAF7B;
+      --flow-1:  #A8BC55;
+      --flow-2:  #E0AE43;
+      --flow-3:  #DB8A4C;
+      --flow-4:  #C9604B;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:   #101318;
+    --surface:  #171B22;
+    --surface-2:#1F242C;
+    --line:     #2C333D;
+    --line-soft:#232932;
+    --ink:      #E8E5DF;
+    --ink-2:    #B3B8C1;
+    --muted:    #838A96;
+    --signal:   #E8A33D;
+    --signal-dim:#2A2418;
+    --confirmed:#69B583;
+    --bounded:  #D6B34A;
+    --refuted:  #DC7A5E;
+    --flow-0:  #5FAF7B;
+    --flow-1:  #A8BC55;
+    --flow-2:  #E0AE43;
+    --flow-3:  #DB8A4C;
+    --flow-4:  #C9604B;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 clamp(1.1rem, 4vw, 3rem); }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .masthead-inner {
+    display: flex; flex-wrap: wrap; gap: 1.5rem 2.5rem;
+    align-items: flex-end; justify-content: space-between;
+    padding: clamp(2.4rem, 6vw, 4rem) 0 clamp(1.6rem, 3vw, 2.2rem);
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 .9rem;
+  }
+  h1 {
+    font-family: Archivo, "Helvetica Neue", sans-serif;
+    font-weight: 700; font-size: clamp(2.1rem, 5.2vw, 3.4rem);
+    line-height: 1.02; letter-spacing: -.025em;
+    margin: 0; text-wrap: balance; max-width: 18ch;
+  }
+  .standfirst {
+    color: var(--ink-2); font-size: clamp(1rem, 1.6vw, 1.12rem);
+    max-width: 46ch; margin: 1.1rem 0 0;
+  }
+  .verdict {
+    border: 1px solid var(--line); border-radius: 3px;
+    background: var(--ground); padding: 1rem 1.15rem;
+    min-width: 15rem;
+  }
+  .verdict dt {
+    font-family: "IBM Plex Mono", monospace; font-size: .68rem;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  }
+  .verdict dd {
+    margin: .15rem 0 .85rem; font-family: Archivo, sans-serif;
+    font-weight: 600; font-size: 1.02rem; letter-spacing: -.01em;
+  }
+  .verdict dd:last-of-type { margin-bottom: 0; }
+
+  /* ---------- key figures band ---------- */
+  .band {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .figs {
+    display: grid; gap: 1px;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    background: var(--line-soft);
+    border-left: 1px solid var(--line-soft);
+    border-right: 1px solid var(--line-soft);
+  }
+  .fig { background: var(--surface-2); padding: 1.35rem 1.2rem; }
+  .fig b {
+    display: block;
+    font-family: Archivo, sans-serif; font-weight: 700;
+    font-size: clamp(1.55rem, 3.2vw, 2.05rem); letter-spacing: -.03em;
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .fig span {
+    display: block; margin-top: .5rem;
+    font-size: .8rem; color: var(--muted); line-height: 1.35;
+  }
+
+  /* ---------- sections ---------- */
+  section { padding: clamp(2.6rem, 6vw, 4.2rem) 0; border-bottom: 1px solid var(--line-soft); }
+  section:last-of-type { border-bottom: 0; }
+  h2 {
+    font-family: Archivo, sans-serif; font-weight: 600;
+    font-size: clamp(1.35rem, 2.8vw, 1.75rem); letter-spacing: -.018em;
+    margin: 0 0 .5rem; text-wrap: balance;
+  }
+  .lede { color: var(--ink-2); max-width: 64ch; margin: 0 0 2rem; }
+  h3 {
+    font-family: Archivo, sans-serif; font-weight: 600; font-size: 1.02rem;
+    letter-spacing: -.008em; margin: 0 0 .45rem;
+  }
+  p { max-width: 66ch; }
+  a { color: var(--signal); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+
+  /* ---------- deliverables ---------- */
+  .deliverables { display: grid; gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); }
+  .deliverable {
+    background: var(--surface); padding: 1.3rem 1.4rem;
+    display: grid; grid-template-columns: 2.4rem 1fr; gap: 0 1.1rem; align-items: start;
+  }
+  .dnum {
+    font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: .78rem;
+    color: var(--signal); padding-top: .18rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .deliverable p { margin: .3rem 0 0; color: var(--ink-2); font-size: .93rem; max-width: 62ch; }
+  .evidence {
+    grid-column: 2; margin-top: .6rem;
+    font-family: "IBM Plex Mono", monospace; font-size: .75rem;
+    color: var(--muted); border-left: 2px solid var(--signal-dim); padding-left: .7rem;
+  }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; border: 1px solid var(--line-soft); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; min-width: 34rem; }
+  caption {
+    text-align: left; padding: .95rem 1.1rem; color: var(--muted);
+    font-family: "IBM Plex Mono", monospace; font-size: .72rem;
+    letter-spacing: .13em; text-transform: uppercase;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  th, td { padding: .62rem 1.1rem; text-align: left; border-bottom: 1px solid var(--line-soft); }
+  thead th {
+    font-family: "IBM Plex Mono", monospace; font-size: .7rem; font-weight: 500;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  .num { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+  .ours td { background: var(--signal-dim); }
+  .ours td:first-child { box-shadow: inset 3px 0 0 var(--signal); }
+  .rank { color: var(--muted); font-family: "IBM Plex Mono", monospace; }
+
+  /* bar cell */
+  .bar { display: flex; align-items: center; gap: .55rem; justify-content: flex-end; }
+  .bar i {
+    display: block; height: 7px; border-radius: 1px; background: var(--signal); opacity: .55;
+  }
+  .ours .bar i { opacity: 1; }
+
+  /* ---------- claim ledger ---------- */
+  .ledger { display: grid; gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); }
+  .claim { background: var(--surface); padding: 1.15rem 1.3rem 1.25rem; }
+  .tag {
+    display: inline-flex; align-items: center; gap: .42rem;
+    font-family: "IBM Plex Mono", monospace; font-size: .68rem;
+    letter-spacing: .12em; text-transform: uppercase; font-weight: 500;
+    margin-bottom: .5rem;
+  }
+  .tag::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .tag.c { color: var(--confirmed); }
+  .tag.b { color: var(--bounded); }
+  .tag.r { color: var(--refuted); }
+  .claim p { margin: .3rem 0 0; color: var(--ink-2); font-size: .93rem; max-width: 64ch; }
+  .stat { font-family: "IBM Plex Mono", monospace; font-size: .82rem; color: var(--ink); }
+
+  /* ---------- defects ---------- */
+  .defects { display: grid; gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); counter-reset: d; }
+  .defect { background: var(--surface); padding: 1.15rem 1.3rem; display: grid; grid-template-columns: 1fr; gap: .3rem; }
+  .defect h3 { margin: 0; }
+  .defect p { margin: 0; color: var(--ink-2); font-size: .92rem; }
+  .found {
+    font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--muted);
+    margin-top: .35rem;
+  }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border: 1px solid var(--signal); border-left-width: 3px;
+    background: var(--signal-dim); padding: 1.2rem 1.35rem; border-radius: 2px;
+  }
+  .callout h3 { color: var(--ink); }
+  .callout p { margin: .35rem 0 0; color: var(--ink-2); font-size: .93rem; }
+
+  .grid2 { display: grid; gap: 1.6rem; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); }
+
+  footer {
+    border-top: 1px solid var(--line); background: var(--surface);
+    padding: 2.2rem 0 3rem; color: var(--muted); font-size: .85rem;
+  }
+  footer p { max-width: 68ch; }
+  code {
+    font-family: "IBM Plex Mono", monospace; font-size: .86em;
+    background: var(--surface-2); padding: .1em .38em; border-radius: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<header class="masthead">
+  <div class="wrap masthead-inner">
+    <div>
+      <p class="eyebrow">Smart India Hackathon 2026 &middot; Problem Statement 26137 &middot; Egreen Quanta</p>
+      <h1>Quantum-inspired routing, measured honestly</h1>
+      <p class="standfirst">A working platform that solves vehicle routing on real Indian road networks, and a benchmark that reports what it actually achieves rather than what would sound best.</p>
+    </div>
+    <dl class="verdict">
+      <dt>Status</dt>
+      <dd>Running end to end</dd>
+      <dt>Headline result</dt>
+      <dd>Beats classical PSO, p&nbsp;=&nbsp;1.4&times;10&#8315;&#8309;</dd>
+      <dt>Deadline</dt>
+      <dd>20 September 2026</dd>
+    </dl>
+  </div>
+</header>
+
+<div class="band">
+  <div class="wrap">
+    <div class="figs">
+      <div class="fig"><b>1,520</b><span>benchmark runs, 17 instances &times; 9 solvers &times; 10 seeds</span></div>
+      <div class="fig"><b>0</b><span>infeasible solutions reported</span></div>
+      <div class="fig"><b>13,343</b><span>road intersections in the live demonstration network</span></div>
+      <div class="fig"><b>138</b><span>published optima reproduced exactly by our objective</span></div>
+      <div class="fig"><b>25k</b><span>lines of Python, with 5,200 in tests</span></div>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <section>
+    <h2>What the brief asked for, and where it is</h2>
+    <p class="lede">Five deliverables were specified. Each is built, and each has evidence behind it rather than an assertion.</p>
+    <div class="deliverables">
+      <article class="deliverable">
+        <div class="dnum">01</div>
+        <div>
+          <h3>Graph-based network model</h3>
+          <p>Three Indian city extracts from OpenStreetMap, with free-flow speeds imputed by road class because Indian OSM data carries almost no speed tags. Edge weights update in place as traffic changes, with no graph rebuild.</p>
+        </div>
+        <div class="evidence">Koramangala: 13,343 nodes, 34,266 directed edges, 2,050 km of road. All 34k weights recomputed in 7.8 ms.</div>
+      </article>
+      <article class="deliverable">
+        <div class="dnum">02</div>
+        <div>
+          <h3>Mathematical formulation</h3>
+          <p>A two-index model with single-commodity flow for capacity and subtour elimination, big-M time propagation for windows, and a weighted time, distance and congestion objective. Every constraint is mapped to the code that enforces it.</p>
+        </div>
+        <div class="evidence">Congestion is defined twice on purpose: a bounded delay fraction for the objective, an unbounded delay ratio for the map. Relation verified.</div>
+      </article>
+      <article class="deliverable">
+        <div class="dnum">03</div>
+        <div>
+          <h3>Quantum-inspired algorithm module</h3>
+          <p>Two engines. A quantum-behaved particle swarm sampling from a delta potential well, and a second engine applying genuine Han&ndash;Kim rotation gates to a qubit register. Both are classical simulations, and the documentation says so.</p>
+        </div>
+        <div class="evidence">Rotation gate verified orthogonal; amplitudes stay normalised under repeated rotation.</div>
+      </article>
+      <article class="deliverable">
+        <div class="dnum">04</div>
+        <div>
+          <h3>Software platform</h3>
+          <p>A service with 21 endpoints streaming live optimisation progress, a nine-command terminal interface, and a map application where you set the hour of day, block a lane, and watch the routes change.</p>
+        </div>
+        <div class="evidence">Driven end to end in a browser: instance generated on real intersections, solved to a feasible five-vehicle plan.</div>
+      </article>
+      <article class="deliverable">
+        <div class="dnum">05</div>
+        <div>
+          <h3>Demonstration and benchmarking</h3>
+          <p>Ten seeds per solver at an equal wall-clock budget, one thread each, gaps measured against published best-known costs and, where an exact solver can close the instance, against proven optima.</p>
+        </div>
+        <div class="evidence">Friedman test over 16 instances, p = 1.25&times;10&#8315;&#8313;, with Holm-corrected pairwise comparisons.</div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>The benchmark</h2>
+    <p class="lede">Every solver received the same decoder, the same local search and the same twenty seconds, so a difference in outcome is attributable to the search rule and nothing else.</p>
+    <div class="scroll">
+      <table>
+        <caption>Mean gap above best-known cost &middot; 170 runs per solver</caption>
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">Solver</th>
+            <th scope="col" class="num">Mean gap</th>
+            <th scope="col" class="num">Hit best known</th>
+            <th scope="col">Relative</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="rank">1</td><td>PyVRP &mdash; hybrid genetic search</td><td class="num">0.24%</td><td class="num">120/170</td><td><div class="bar"><i style="width:12px"></i></div></td></tr>
+          <tr class="ours"><td class="rank">2</td><td><strong>Quantum rotation gate</strong> &mdash; ours</td><td class="num">0.65%</td><td class="num">104/170</td><td><div class="bar"><i style="width:32px"></i></div></td></tr>
+          <tr><td class="rank">3</td><td>Genetic algorithm</td><td class="num">0.66%</td><td class="num">105/170</td><td><div class="bar"><i style="width:33px"></i></div></td></tr>
+          <tr><td class="rank">4</td><td>Ant colony optimisation</td><td class="num">0.77%</td><td class="num">100/170</td><td><div class="bar"><i style="width:38px"></i></div></td></tr>
+          <tr class="ours"><td class="rank">5</td><td><strong>Quantum particle swarm</strong> &mdash; ours</td><td class="num">0.85%</td><td class="num">100/170</td><td><div class="bar"><i style="width:42px"></i></div></td></tr>
+          <tr><td class="rank">6</td><td>Simulated annealing</td><td class="num">0.93%</td><td class="num">81/170</td><td><div class="bar"><i style="width:46px"></i></div></td></tr>
+          <tr><td class="rank">7</td><td>Classical particle swarm</td><td class="num">0.99%</td><td class="num">80/170</td><td><div class="bar"><i style="width:49px"></i></div></td></tr>
+          <tr><td class="rank">8</td><td>Random multi-start</td><td class="num">1.21%</td><td class="num">77/170</td><td><div class="bar"><i style="width:60px"></i></div></td></tr>
+          <tr><td class="rank">9</td><td>OR-Tools guided local search</td><td class="num">2.23%</td><td class="num">60/160</td><td><div class="bar"><i style="width:110px"></i></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:1.4rem">OR-Tools found no solution at all on the 153-customer instance in all ten seeds. That is reported as a failure to solve rather than averaged in as a bad number.</p>
+  </section>
+
+  <section>
+    <h2>What we claim, and what we do not</h2>
+    <p class="lede">The problem statement asks for a quantum-inspired method benchmarked against conventional metaheuristics. That comparison came out positive. Several others did not, and both belong in the same table.</p>
+    <div class="ledger">
+      <article class="claim">
+        <span class="tag c">Confirmed</span>
+        <h3>The quantum-behaved swarm beats the classical swarm it derives from</h3>
+        <p>Under an identical decoder, local search and budget, across 170 paired runs. This is the comparison the brief actually asks for.</p>
+        <p class="stat">0.85% against 0.99% &middot; p = 1.4&times;10&#8315;&#8309; &middot; effect size 0.57</p>
+      </article>
+      <article class="claim">
+        <span class="tag c">Confirmed</span>
+        <h3>It also beats simulated annealing and multi-start local search</h3>
+        <p>Both significant after Holm correction for multiple comparisons.</p>
+        <p class="stat">vs annealing p = 0.0016 &middot; vs multi-start p = 1.7&times;10&#8315;&#8312;</p>
+      </article>
+      <article class="claim">
+        <span class="tag c">Confirmed</span>
+        <h3>The standard contraction coefficient is wrong for this encoding</h3>
+        <p>Under a random-key representation only the induced ordering matters, so the smallest meaningful change is one rank. The published range makes the sampling step about twenty times too large. Reducing it cut the median gap from 0.77% to 0.25%.</p>
+        <p class="stat">p = 1.3&times;10&#8315;&#8308;, reproduced across two independent runs of 80 and 88 pairs</p>
+      </article>
+      <article class="claim">
+        <span class="tag b">Bounded</span>
+        <h3>It does not beat every classical method</h3>
+        <p>The genetic algorithm and ant colony optimisation are both significantly better. PyVRP, a specialised state-of-the-art solver, is far ahead at 0.24%. Every table says so.</p>
+      </article>
+      <article class="claim">
+        <span class="tag r">Refuted</span>
+        <h3>The step size does not scale with instance size</h3>
+        <p>We predicted the right coefficient should follow 1/n and that this would fix the largest instance. Tested across eleven instances up to two hundred customers, it is indistinguishable from a fixed constant and no better where it mattered. The prediction was wrong and is recorded as such.</p>
+        <p class="stat">p = 0.42 over 88 paired runs</p>
+      </article>
+      <article class="claim">
+        <span class="tag r">Refuted</span>
+        <h3>No quantum advantage, and no quantum hardware</h3>
+        <p>Both engines are classical algorithms whose update rules borrow their form from quantum mechanics. Asymptotic complexity is unchanged. Single-pair shortest paths are solved exactly by Dijkstra and A*, never by a metaheuristic.</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Defects found by running it</h2>
+    <p class="lede">Each of these produced a plausible-looking but wrong result, and none was caught by reading the code. They are listed because the same mistakes are easy to make again.</p>
+    <div class="defects">
+      <article class="defect">
+        <h3>Segment reversal was priced wrongly on one-way streets</h3>
+        <p>The 2-opt operator used the four-arc shortcut that is only valid on symmetric cost matrices. Real road networks are asymmetric, so it silently accepted moves that made routes longer.</p>
+        <p class="found">Would have corrupted every road-network result.</p>
+      </article>
+      <article class="defect">
+        <h3>The swarm's contraction never happened</h3>
+        <p>The coefficient was indexed on the iteration cap, which time-budgeted runs leave effectively infinite. The progress fraction stayed near zero and the exploration-to-exploitation transition, the algorithm's central mechanism, never ran.</p>
+        <p class="found">Found by noticing a longer run scored worse than a shorter one.</p>
+      </article>
+      <article class="defect">
+        <h3>Two solvers minimised different objectives</h3>
+        <p>The quantum swarm hard-coded a constraint penalty of 1000 while every other solver inherited an instance-scaled value near 16. The comparison between them was not a comparison, and it invalidated a whole ablation.</p>
+        <p class="found">Found by an adversarial review pass, not by the tests.</p>
+      </article>
+      <article class="defect">
+        <h3>Infeasible runs were averaged into headline gaps</h3>
+        <p>An overloaded plan can be arbitrarily cheap, so including it flattered an algorithm exactly when it had failed. Three solvers appeared to beat a published optimum, which is impossible. One scored 5.6% where the honest figure was 10.6%.</p>
+        <p class="found">A regression test now asserts no result set can report a negative gap.</p>
+      </article>
+      <article class="defect">
+        <h3>A repair pass undid its own work</h3>
+        <p>After splitting off an overloaded route, it polished the result under ordinary penalties, which merged the routes again. Forty forced overloads left three unrepaired; all forty now repair.</p>
+        <p class="found">Its failures were also being swallowed by a bare exception handler.</p>
+      </article>
+      <article class="defect">
+        <h3>Concurrent requests bypassed the run limit</h3>
+        <p>The service checked its capacity before registering the run, so six simultaneous requests all succeeded against a cap of four.</p>
+        <p class="found">Sequential requests behaved correctly, which is why it went unnoticed.</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>The demonstration</h2>
+    <p class="lede">Forty deliveries across Koramangala, Bengaluru, under morning traffic, then disrupted.</p>
+    <div class="grid2">
+      <div>
+        <div class="scroll">
+          <table>
+            <caption>Response to a lane blockage</caption>
+            <thead><tr><th scope="col">Step</th><th scope="col" class="num">Vehicle-minutes</th></tr></thead>
+            <tbody>
+              <tr><td>Optimised plan at 09:00</td><td class="num">1,987</td></tr>
+              <tr><td>After one lane blocked on 15 links in use</td><td class="num">2,105</td></tr>
+              <tr><td>Re-optimised cold, 2 s</td><td class="num">2,074</td></tr>
+              <tr><td class="ours"><strong>Re-optimised warm, 2 s</strong></td><td class="num"><strong>2,030</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:1.2rem">Warm starting from the previous solution recovers more than twice as much as restarting from scratch in the same two seconds. That is the argument for keeping an optimiser resident in a live traffic system.</p>
+      </div>
+      <div>
+        <div class="callout">
+          <h3>Where the honesty machinery shows</h3>
+          <p>The search first returned a plan two units over capacity on one vehicle, because it is deliberately allowed to cross infeasible ground where the good moves are. A repair pass escalates the penalties until the plan is dispatchable, which cost 5% more vehicle time.</p>
+          <p>The platform reports the feasible, more expensive plan. Not the cheaper impossible one.</p>
+        </div>
+        <div class="scroll" style="margin-top:1.4rem">
+          <table>
+            <caption>Peak congestion by road class, 09:00</caption>
+            <thead><tr><th scope="col">Class</th><th scope="col" class="num">Segments</th><th scope="col" class="num">Peak / free flow</th></tr></thead>
+            <tbody>
+              <tr><td>Trunk</td><td class="num">159</td><td class="num">1.65&times;</td></tr>
+              <tr><td>Primary</td><td class="num">575</td><td class="num">1.55&times;</td></tr>
+              <tr><td>Secondary</td><td class="num">1,176</td><td class="num">1.47&times;</td></tr>
+              <tr><td>Tertiary</td><td class="num">3,388</td><td class="num">1.27&times;</td></tr>
+              <tr><td>Residential</td><td class="num">27,705</td><td class="num">1.06&times;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Before you submit</h2>
+    <p class="lede">Two things about the submission itself, verified against the official guidelines rather than the listing.</p>
+    <div class="grid2">
+      <div class="callout">
+        <h3>The statement can close before the deadline does</h3>
+        <p>Submission closes 20 September 2026, but each problem statement freezes once 500 ideas are submitted. The public counter sits next to PS 26137 on the portal. Check it early.</p>
+      </div>
+      <div>
+        <h3>What the evaluation actually names</h3>
+        <p>Novelty, complexity, clarity and detail in the prescribed format, feasibility, practicability, sustainability, scale of impact, user experience, and potential for future work. Only four to five teams per statement reach the finale, and the sponsoring organisation is not obliged to pick a winner.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>All figures measured on an Apple M4 with ten cores, single-threaded per run, on 3 September 2026. Benchmark instances are CVRPLIB and Solomon; road network data is &copy; OpenStreetMap contributors, ODbL. Customer locations in the demonstration are generated; the road network, its geometry and its travel times are real.</p>
+    <p style="margin-top:.9rem">The full record, including the negative results and the confound that invalidated an earlier version of them, is in <code>docs/findings.md</code>.</p>
+  </div>
+</footer>
