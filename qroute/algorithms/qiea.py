@@ -76,11 +76,21 @@ from being a claim about quantum-inspired methods in general:
   evidence about these instances. The full benchmark sweep is what should be
   quoted in the report.
 * Part of the margin is not the gate at all. Setting ``delta_theta=0`` disables
-  rotation entirely and leaves a randomised-restart control that still has the
-  same construction, split and local search. On A-n80-k10 that control scores
-  1.89% (QIEA) and 2.46% (QuantumRotationKeys) - so the gate is worth roughly
-  1.3 and 1.5 percentage points respectively, and the rest comes from the
-  representation and from local search.
+  rotation entirely, leaving a randomised-restart control with the same
+  construction, split and local search. Same protocol, A-n80-k10:
+
+      ===================  =============  =============  ===========
+      configuration        QIEA           QRKeys         end entropy
+      ===================  =============  =============  ===========
+      gate off, theta=0    1.47%          2.44%          1.000 bits
+      gate on, literal HK  1.29%          1.89%          ~0.08 bits
+      gate on, Lamarckian  0.49%          0.89%          ~0.08 bits
+      ===================  =============  =============  ===========
+
+  The gate is worth about 1.0 and 1.6 percentage points respectively; the rest
+  comes from the representation and from local search. The entropy column is the
+  control working as intended - with no rotation the registers sit at 1 bit per
+  qubit for the whole run and never learn anything.
 * Part of the margin is a QPSO configuration artefact. QPSO's ``beta`` schedule
   is keyed to ``max_iterations``, which a wall-clock benchmark leaves
   effectively unbounded, so its contraction coefficient never anneals. Giving
@@ -410,13 +420,17 @@ class QIEA(_RotationOptimizer):
         The expected objection is entropy: the target mask is sparse - at most
         one set bit per node against roughly ``k/2`` in an observation - so the
         agreeing-zero rows of the table dominate and the register might commit
-        far too early. Measured on this machine at a 10-second budget on
-        A-n80-k10 (2 seeds), it does not: mean gap to best-known falls from
-        1.59% without the write-back to 0.26% with it, and the run completes
-        *more* generations (79 against 63) because the sharper masks build
-        better tours for local search to start from. It is therefore on by
-        default, with ``lamarckian=False`` available to recover the literal
-        Han-Kim update. Note that this is a deviation from the 2002 paper.
+        far too early. Measured, it does not. On A-n80-k10 at a 20-second budget
+        over 3 seeds the mean gap to best-known falls from 1.29% under the
+        literal Han-Kim update to 0.49% with the write-back, and the run
+        completes *more* generations (73 against 57) because sharper masks build
+        better tours for local search to start from. Final register entropy is
+        about 0.08 bits either way, so the feared extra collapse does not show
+        up.
+
+        It is therefore on by default, with ``lamarckian=False`` available to
+        recover the literal Han-Kim update. This is a deliberate deviation from
+        the 2002 paper and is flagged as such.
         """
         mask = np.zeros((self.size, self.k), dtype=np.uint8)
         for route in routes:

@@ -277,11 +277,26 @@ class TomTomFlowSource(TrafficSource):
                 covered += 1
                 confidences.append(float(seg.get("confidence", 1.0)))
 
+        # A request can succeed at the HTTP level and still carry no usable
+        # speeds (a probe placed off the road network, a segment the provider
+        # does not measure). If that happens to *every* probe, this observation
+        # is entirely baseline data wearing a TomTom provenance string, which is
+        # exactly the confusion this module exists to prevent. Say so, in the
+        # same field the rest of the platform already reads for fallbacks.
+        reason = None
+        if covered == 0:
+            reason = (
+                f"none of the {len(self.probes)} TomTom probes returned a usable "
+                "speed; every edge in this observation came from "
+                f"{getattr(self.baseline, 'name', None) or 'the free-flow default'}"
+            )
+
         return TrafficObservation(
             speed_factor=base,
             live=covered > 0,
             source="tomtom:flowSegmentData",
             coverage=covered / max(self.n_edges, 1),
+            fallback_reason=reason,
             meta={
                 "probes_requested": len(self.probes),
                 "probes_covered": covered,

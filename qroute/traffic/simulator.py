@@ -49,6 +49,15 @@ take those from a ``RoadNetwork``-like object if it exposes them, from a raw
 NetworkX ``MultiDiGraph`` (as produced by OSMnx) otherwise, or from arrays
 handed in directly. Writing results back is equally defensive: see
 :meth:`TrafficSimulator.apply_to`.
+
+One asymmetry between the two directions is worth stating plainly, because it
+is a place the layers genuinely disagree. :meth:`edge_travel_times` reports a
+closed edge as ``inf``; ``RoadNetwork.update_weights`` requires finite,
+strictly positive times and raises on anything else. :meth:`apply_to` therefore
+substitutes the finite sentinel :data:`CLOSED_EDGE_TRAVEL_TIME_S` on the way
+out, and :meth:`closed_mask` remains the authoritative record of what is shut.
+Without that substitution, writing back to a ``RoadNetwork`` failed outright
+whenever a closure was active.
 """
 
 from __future__ import annotations
@@ -92,6 +101,28 @@ _WRITEBACK_METHODS = (
     "update_weights",
     "apply_travel_times",
 )
+
+# Travel time written for a closed edge by :meth:`TrafficSimulator.apply_to`.
+#
+# `edge_travel_times` reports a closure as `inf`, which is the honest answer and
+# the one a NumPy-native consumer wants. It is not, however, a value every
+# network representation will accept: `qroute.graph.RoadNetwork.update_weights`
+# validates that travel times are finite and strictly positive, and stores them
+# in a CSR matrix whose entries are dense floats. Handing it an `inf` raises,
+# which meant that before this constant existed `apply_to(RoadNetwork)` failed
+# outright for the whole duration of any closure -- the one event kind the
+# platform most wants to demonstrate.
+#
+# 1e7 seconds is about four months. It is finite, so it round-trips through any
+# numeric container, and it is far beyond any real route cost in a city sector
+# (the whole Bengaluru extract sums to about 2.4e5 seconds of free-flow time),
+# so a shortest-path search will exhaust every genuine alternative before it
+# considers a closed edge. The residual difference from `inf` is that a router
+# on a graph a closure has actually *cut* will return an absurd finite path
+# instead of reporting no route; `closed_mask()` remains the authoritative test,
+# and `apply_to` accepts `closed_travel_time=None` for consumers that can hold
+# an infinity. The API layer uses the same 1e7 sentinel, deliberately.
+CLOSED_EDGE_TRAVEL_TIME_S: float = 1e7
 
 
 @dataclass
@@ -590,7 +621,12 @@ class TrafficSimulator:
         return closed
 
     # ------------------------------------------------------------- write-back
-    def apply_to(self, network, attribute: str = "travel_time") -> int:
+    def apply_to(
+        self,
+        network,
+        attribute: str = "travel_time",
+        closed_travel_time: float | None = CLOSED_EDGE_TRAVEL_TIME_S,
+    ) -> int:
         """Push the current travel times onto ``network``; returns edge count.
 
         Tries, in order: a documented update method on a ``RoadNetwork``
@@ -601,8 +637,25 @@ class TrafficSimulator:
         The NetworkX path is a Python loop, so it is the slow one -- still
         O(edges), but roughly an order of magnitude slower than computing the
         times in the first place. Prefer a ``RoadNetwork`` that takes an array.
+
+        Parameters
+        ----------
+        closed_travel_time:
+            Value substituted for the ``inf`` that :meth:`edge_travel_times`
+            reports on a closed edge, defaulting to
+            :data:`CLOSED_EDGE_TRAVEL_TIME_S`. Pass ``None`` to write ``inf``
+            through unchanged, which only consumers that can hold an infinity
+            should do -- ``qroute.graph.RoadNetwork.update_weights`` rejects it
+            and every active closure would then raise. See the constant's
+            comment for why a finite sentinel is the right default and what it
+            costs. :meth:`closed_mask` stays the authoritative record of which
+            edges are shut, whichever value is written.
         """
         times = self.edge_travel_times()
+        if closed_travel_time is not None:
+            closed = ~np.isfinite(times)
+            if closed.any():
+                times = np.where(closed, float(closed_travel_time), times)
         for meth in _WRITEBACK_METHODS:
             fn = getattr(network, meth, None)
             if callable(fn):

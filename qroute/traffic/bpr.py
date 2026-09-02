@@ -52,7 +52,8 @@ module, ``a = 4``) are the reason to be careful:
 5.0     94.750   32.876
 ======  =======  =========
 
-Conical is *steeper* than BPR everywhere below ``x`` about 3.2, not gentler.
+Conical is *steeper* than BPR everywhere below ``x = 3.337`` (the crossover,
+located numerically; ``a = 4``), not gentler.
 It is pinned to exactly ``2 * t0`` at capacity for every ``a``, against BPR's
 1.15 -- a deliberate design property, since BPR is widely criticised for being
 implausibly flat at capacity, but a large difference all the same. Only in deep
@@ -153,7 +154,7 @@ def conical_multiplier(saturation: ArrayLike, a: float = CONICAL_A) -> np.ndarra
     Exact reference values, useful when reading the tests: ``f(0) = 1``
     regardless of ``a``, and ``f(1) = 2`` regardless of ``a``. Above capacity
     the function tends to a straight line of slope ``2a``, so it overtakes
-    BPR's quartic only around ``x = 3.2`` (with ``a = 4``); below that it
+    BPR's quartic only at ``x = 3.337`` (with ``a = 4``); below that it
     charges *more* than BPR, not less. See the module docstring's table.
     """
     x = np.clip(np.asarray(saturation, dtype=np.float64), 0.0, None)

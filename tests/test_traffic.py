@@ -608,6 +608,56 @@ class TestSimulator:
         sim.apply_to(net)
         np.testing.assert_array_equal(net.received, sim.edge_travel_times())
 
+    def test_apply_to_writes_a_finite_sentinel_for_closed_edges(self):
+        """A closure must not make the write-back path unusable.
+
+        ``edge_travel_times`` reports a closure as ``inf``, but a network that
+        stores its weights in a numeric array cannot hold one --
+        ``qroute.graph.RoadNetwork.update_weights`` validates finiteness and
+        raises. Before this was fixed, every active closure broke ``apply_to``
+        for exactly the event kind the platform most wants to show.
+        """
+        from qroute.traffic.simulator import CLOSED_EDGE_TRAVEL_TIME_S
+
+        class StrictRoadNetwork:
+            """Rejects non-finite times, exactly as RoadNetwork does."""
+
+            def __init__(self, graph):
+                self.graph = graph
+                self.received = None
+
+            def update_weights(self, travel_times):
+                t = np.asarray(travel_times, dtype=np.float64)
+                if not np.all(np.isfinite(t)) or np.any(t <= 0):
+                    raise ValueError("travel times must be finite and strictly positive")
+                self.received = t
+
+        net = StrictRoadNetwork(make_toy_graph())
+        sim = TrafficSimulator(net, seed=5).set_clock(19.0)
+        sim.add_event(events.closure([2], sim.time_minutes, 60))
+        assert math.isinf(float(sim.edge_travel_times()[2]))
+
+        sim.apply_to(net)  # must not raise
+        assert net.received[2] == pytest.approx(CLOSED_EDGE_TRAVEL_TIME_S)
+        assert np.all(np.isfinite(net.received))
+        # The sentinel has to dominate any real route, or a router would still
+        # be willing to use the closed edge.
+        assert net.received[2] > 1e4 * np.sum(sim.edges.free_flow_time)
+        # Untouched edges keep their exact simulated value.
+        live = np.delete(np.arange(6), 2)
+        np.testing.assert_array_equal(net.received[live], sim.edge_travel_times()[live])
+        # closed_mask stays the authoritative record of what is shut.
+        assert sim.closed_mask()[2] and not sim.closed_mask()[live].any()
+
+    def test_apply_to_can_still_write_infinities_on_request(self):
+        """Consumers that can hold an infinity opt in explicitly."""
+        g = make_toy_graph()
+        sim = TrafficSimulator(g, seed=5).set_clock(19.0)
+        sim.add_event(events.closure([2], sim.time_minutes, 60))
+        sim.apply_to(g, closed_travel_time=None)
+        written = np.array([d["travel_time"] for *_x, d in g.edges(keys=True, data=True)])
+        assert math.isinf(float(written[2]))
+
     def test_absolute_capacity_cancels_out_of_the_travel_time(self):
         """Documented consequence of the saturation-first demand model.
 
@@ -769,6 +819,27 @@ class TestSources:
         toy_sim.add_event(events.closure([2], toy_sim.time_minutes, 60))
         obs = sources.SimulatedSource(toy_sim).fetch()
         assert math.isinf(float(obs.travel_times(toy_sim.edges.free_flow_time)[2]))
+
+    def test_tomtom_says_so_when_no_probe_returned_a_speed(self, monkeypatch, toy_sim):
+        """A TomTom observation carrying only baseline data must admit it.
+
+        The request can succeed and still carry no usable speed. If that happens
+        to every probe the array is entirely simulated, and an observation
+        labelled ``tomtom:flowSegmentData`` with no reason attached would be
+        precisely the confusion this module exists to prevent.
+        """
+        monkeypatch.setenv(sources.TOMTOM_API_KEY_ENV, "dummy")
+        src = sources.TomTomFlowSource(
+            probes=[(1, 12.93, 77.62)],
+            n_edges=6,
+            baseline=sources.SimulatedSource(toy_sim),
+        )
+        monkeypatch.setattr(src, "_request", lambda lat, lon: {"flowSegmentData": {}})
+        obs = src.fetch()
+        assert obs.live is False
+        assert obs.coverage == 0.0
+        assert obs.fallback_reason is not None and "probe" in obs.fallback_reason
+        assert obs.as_dict()["fallback_reason"] == obs.fallback_reason
 
     def test_fallback_tagging(self, toy_sim):
         obs = sources.fallback_observation(

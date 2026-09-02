@@ -158,7 +158,7 @@ export function SamplingDemo() {
             ctx.fillStyle = colour;
             ctx.textAlign = 'center';
             ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-            ctx.fillText(label, toX(value), panel.y + 10);
+            ctx.fillText(label, toX(value), panel.y + 11);
           }
         }
 
@@ -194,9 +194,9 @@ export function SamplingDemo() {
         ctx.font = '10px ui-monospace, SFMono-Regular, monospace';
         ctx.textAlign = 'right';
         ctx.fillText(
-          `${((100 * visited) / BINS).toFixed(0)} % of the domain visited in ${steps} steps`,
+          `${((100 * visited) / BINS).toFixed(0)} % of the domain reached in ${steps} steps`,
           width - padR,
-          panel.y + 10,
+          panel.y - 2,
         );
       }
     };
@@ -226,7 +226,7 @@ export function SamplingDemo() {
         ref={canvasRef}
         style={{
           width: '100%',
-          height: 260,
+          height: 288,
           display: 'block',
           background: 'var(--bg)',
           border: '1px solid var(--border)',
