@@ -191,6 +191,7 @@ def solve_cvrp_cpsat(
     log: bool = False,
     hint: Sequence[Sequence[int]] | None = None,
     relative_gap: float = 0.0,
+    deterministic_time: float | None = None,
 ) -> CPSATResult:
     """Solve a CVRP (optionally with time windows) exactly with CP-SAT.
 
@@ -203,19 +204,30 @@ def solve_cvrp_cpsat(
         Number of parallel search workers. Eight is the project default and
         matches the ten-core development machine without starving it.
 
-        Note what this costs: with more than one worker CP-SAT is **not**
-        reproducible under a wall-clock limit, seed or no seed, because the
-        workers race and whichever finishes a subproblem first changes the
-        search. Measured on A-n45-k7 with ``time_limit=30, seed=0``: two
-        ``workers=8`` runs returned 1243 and 1218 with dual bounds 917 and 859,
-        while two ``workers=1`` runs returned 1227 and bound 686 both times. A
-        *proof* is unaffected -- the optimum is the optimum whichever worker
-        finds it -- but an unproven incumbent or dual bound from this function
-        is a sample, not a constant. Use ``workers=1`` when a table has to be
-        byte-reproducible, and report several runs otherwise.
+        Note what this costs: under a wall-clock limit CP-SAT is **not**
+        reproducible at any worker count, seed or no seed, because the amount
+        of search that fits in the budget depends on machine load. Measured on
+        A-n45-k7, ``seed=0``: two ``workers=8, time_limit=30`` runs returned
+        1243 and 1218 with dual bounds 917 and 859; two ``workers=1,
+        time_limit=6`` runs returned 1246 and 1231. A *proof* is unaffected --
+        the optimum is the optimum whichever worker finds it, and both runs of
+        a closed instance return the same value -- but an unproven incumbent or
+        dual bound is a sample, not a constant. Use ``deterministic_time`` with
+        ``workers=1`` for a byte-reproducible run; report several runs
+        otherwise.
     seed:
-        CP-SAT's random seed. It fixes the search only in combination with
-        ``workers=1``; see above.
+        CP-SAT's random seed. On its own it does not make a time-limited run
+        reproducible; see ``workers`` and ``deterministic_time``.
+    deterministic_time:
+        Budget in CP-SAT's *deterministic* time units, used instead of the
+        wall clock. This is the only reproducible stopping rule the solver
+        offers, and it is reproducible only with ``workers=1``: measured on
+        A-n45-k7 at ``deterministic_time=3.0``, two single-worker runs returned
+        1227 with dual bound 686 and identical routes, while two eight-worker
+        runs returned 1229 and 1231 with bounds 883 and 865. One unit is
+        roughly a second of one core here, but the mapping is not a promise --
+        the point is repeatability, not a wall-clock guarantee, so a run can
+        take substantially longer than the number suggests.
     max_vehicles:
         Upper bound on the number of routes. ``None`` means the instance's own
         fleet limit if it has one, otherwise the number of customers, i.e. an
@@ -342,7 +354,13 @@ def solve_cvrp_cpsat(
 
     # ------------------------------------------------------------- solve
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = float(time_limit)
+    if deterministic_time is not None:
+        # Deterministic time replaces the clock rather than capping it: keeping
+        # both would reintroduce the wall-clock race this option exists to
+        # remove, since whichever limit bites first would depend on load.
+        solver.parameters.max_deterministic_time = float(deterministic_time)
+    else:
+        solver.parameters.max_time_in_seconds = float(time_limit)
     solver.parameters.num_workers = int(workers)
     solver.parameters.random_seed = int(seed)
     solver.parameters.log_search_progress = bool(log)

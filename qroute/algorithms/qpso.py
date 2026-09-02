@@ -101,6 +101,7 @@ class QPSO(Optimizer):
                  beta_start: float = 1.0,
                  beta_end: float = 0.5,
                  beta_schedule: str = "linear",
+                 beta_scaling: str = "fixed",
                  weighted_mbest: bool = True,
                  mutation: str = "none",
                  mutation_rate: float = 0.10,
@@ -124,7 +125,8 @@ class QPSO(Optimizer):
                  **kw):
         super().__init__(instance, stop, seed, callback,
                          swarm_size=swarm_size, beta_start=beta_start, beta_end=beta_end,
-                         beta_schedule=beta_schedule, weighted_mbest=weighted_mbest,
+                         beta_schedule=beta_schedule, beta_scaling=beta_scaling,
+                         weighted_mbest=weighted_mbest,
                          mutation=mutation, mutation_rate=mutation_rate,
                          mutation_scale=mutation_scale, elite_fraction=elite_fraction,
                          restart_after=restart_after, restart_fraction=restart_fraction,
@@ -135,6 +137,7 @@ class QPSO(Optimizer):
         self.beta_start = float(beta_start)
         self.beta_end = float(beta_end)
         self.beta_schedule = beta_schedule
+        self.beta_scaling = beta_scaling
         self.weighted_mbest = bool(weighted_mbest)
         self.mutation = mutation
         self.mutation_rate = float(mutation_rate)
@@ -170,6 +173,17 @@ class QPSO(Optimizer):
         happen, which is precisely the behaviour the algorithm is supposed to
         provide.
         """
+        scale = 1.0
+        if self.beta_scaling == "rank":
+            # Derived rather than tuned. The step taken in one dimension is
+            # beta * |mbest - x| * ln(1/u). With canonical rank keys the mean
+            # best position sits mid-range in every dimension, so |mbest - x| is
+            # roughly 0.29 whatever the instance, while the smallest meaningful
+            # change to an ordering is one rank, or 1/n. A step that refines
+            # rather than randomises therefore needs beta proportional to 1/n.
+            # The constant is fixed by the measured optimum on instances of
+            # about eighty customers, where beta = 0.05 was best.
+            scale = (0.05 * 80.0) / max(self.n, 1) / max(self.beta_start, 1e-9)
         frac = 0.0
         if np.isfinite(self.stop.max_seconds) and self.stop.max_seconds > 0:
             frac = self.elapsed / self.stop.max_seconds
@@ -177,11 +191,11 @@ class QPSO(Optimizer):
             frac = max(frac, iteration / max(self.stop.max_iterations, 1))
         frac = min(max(frac, 0.0), 1.0)
         if self.beta_schedule == "linear":
-            return self.beta_start + (self.beta_end - self.beta_start) * frac
+            return scale * (self.beta_start + (self.beta_end - self.beta_start) * frac)
         if self.beta_schedule == "exponential":
-            return self.beta_start * (self.beta_end / self.beta_start) ** frac
+            return scale * self.beta_start * (self.beta_end / self.beta_start) ** frac
         if self.beta_schedule == "fixed":
-            return self.beta_start
+            return scale * self.beta_start
         raise ValueError(f"unknown beta schedule {self.beta_schedule!r}")
 
     # ------------------------------------------------------------------- run

@@ -181,17 +181,19 @@ def test_cpsat_withholds_the_optimality_claim_when_scaling_is_inexact():
     assert sat.cost == pytest.approx(held_karp_tsp(cost).cost, rel=1e-3)
 
 
-def test_cpsat_is_reproducible_only_with_a_single_worker():
+def test_cpsat_is_reproducible_only_under_deterministic_time():
     """Pins what the ``seed`` argument does and does not buy.
 
-    Multi-worker CP-SAT under a wall-clock limit is a race, so an *unproven*
-    incumbent or dual bound varies between identically seeded runs. Only the
-    single-worker path is byte-reproducible. A benchmark that quotes a CP-SAT
-    dual bound as if it were a constant is quoting one sample.
+    Under a *wall-clock* limit CP-SAT is a race against the machine, so an
+    unproven incumbent and dual bound vary between identically seeded runs at
+    any worker count. ``deterministic_time`` with a single worker is the one
+    stopping rule that repeats exactly. A benchmark quoting a CP-SAT dual bound
+    as though it were a constant is quoting one sample, and this test is what
+    keeps that distinction from being forgotten.
     """
-    inst = load("A-n45-k7")  # far too hard to close in the budget below
-    a = solve_cvrp_cpsat(inst, time_limit=6, workers=1, seed=0)
-    b = solve_cvrp_cpsat(inst, time_limit=6, workers=1, seed=0)
+    inst = load("A-n45-k7")  # far too hard to close in the budgets below
+    a = solve_cvrp_cpsat(inst, workers=1, seed=0, deterministic_time=1.0)
+    b = solve_cvrp_cpsat(inst, workers=1, seed=0, deterministic_time=1.0)
     assert not a.proven_optimal
     assert a.cost == pytest.approx(b.cost)
     assert a.lower_bound == pytest.approx(b.lower_bound)

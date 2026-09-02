@@ -138,15 +138,94 @@ Not supported, and therefore not claimed:
 
 ---
 
-## 5. What would be needed to change the result
+## 5. The step-scaling defect, and fixing it
 
-Stated so the work can be continued rather than merely concluded.
+The diagnosis in section 3 makes a prediction that can be tested rather than
+merely asserted: if the sampling step is far larger than the differences it
+should be refining, then reducing the contraction coefficient well below its
+classical range should improve the result.
 
-The step-length scaling is the concrete defect, and it is fixable in principle:
-the sampling width has to be expressed in units of the representation, which for
-rank keys means `1/n` rather than the raw coordinate spread. A second, larger
-change would be to give the swarm the diversity-aware survivor selection that
-the strongest solvers for this problem use, where an individual's fitness
-combines its cost rank with its distance from the rest of the population. Both
-are real research directions rather than parameter tweaks, and neither is
-claimed here as done.
+The published QPSO literature uses coefficients between about 0.5 and 1.0, and
+Sun et al.'s stability analysis bounds them above by roughly 1.78. Those values
+come from continuous function optimisation, where a coordinate has absolute
+meaning. A random-key permutation encoding is different: the coordinate itself
+is meaningless, only the induced ordering matters, and the smallest meaningful
+change is one rank.
+
+Sweeping the coefficient on five instances with five seeds at 3,000 evaluations:
+
+| Contraction coefficient | Mean gap |
+| --- | --- |
+| 1.0, the classical default | 1.53% |
+| 0.5, the classical lower bound | 1.43% |
+| 0.2 | 1.27% |
+| **0.05** | **1.01%** |
+| 0.02 | 1.16% |
+| Multi-start control | 1.25% |
+
+The trend is monotone into an optimum near 0.05, twenty times below the standard
+value. Confirming on ten instances with eight seeds, paired by instance and seed:
+
+| Variant | Mean gap | Median gap |
+| --- | --- | --- |
+| Multi-start + local search | 0.92% | 0.80% |
+| QPSO, coefficient 1.0 | 1.36% | 0.77% |
+| QPSO, coefficient 0.05 | 1.04% | 0.25% |
+
+The reduced coefficient beats the classical one with p = 0.00015 on a Wilcoxon
+signed-rank test over 80 paired runs, effect size 0.57. Against the multi-start
+control the difference is no longer significant either way (p = 0.105), so the
+correction moves QPSO from significantly worse than the control to tied with it.
+
+The mean remains marginally behind the control because of a single instance,
+X-n153-k22, where the swarm scores 5.16% against the control's 1.70%. That is
+the largest instance in the set, and it is what the diagnosis would predict: if
+the right step is proportional to `1/n`, then a constant fitted at eighty
+customers is too large at a hundred and fifty.
+
+### The scaling law
+
+Written out, the step in one dimension is `beta * |mbest - x| * ln(1/u)`. With
+canonical rank keys the mean best position sits mid-range in every dimension, so
+`|mbest - x|` is about 0.29 regardless of the instance, and `ln(1/u)` averages
+one. The step is therefore about `0.29 * beta`, while the smallest meaningful
+change to an ordering is `1/n`. Requiring the two to be comparable gives
+
+    beta  ~  c / n
+
+with the constant fixed by the measured optimum at eighty customers, `c = 1.16`.
+This is available as `beta_scaling="rank"` and is derived from the geometry of
+the representation rather than fitted per instance.
+
+---
+
+## 6. What this means for the claims made
+
+Supported by measurement:
+
+* The route split is optimal for the ordering it receives, verified against
+  brute-force enumeration on 300 random instances.
+* Shortest paths are exact.
+* Reported solutions are feasible, and gaps are measured against published
+  best-known values or proven optima.
+* The quantum-inspired update rule is a strong optimiser on its own: 1.25%
+  against 146.6% for random sampling at equal evaluations.
+* The classical contraction range is wrong for a random-key encoding, and
+  correcting it is a significant improvement (p = 0.00015).
+
+Not supported, and therefore not claimed:
+
+* That QPSO beats every classical metaheuristic. It does not: the genetic
+  algorithm and ant colony optimisation are both better on these instances.
+* That the corrected version beats multi-start local search. It ties with it.
+* Any claim of quantum advantage, or of quantum hardware being involved.
+
+---
+
+## 7. What would be needed to go further
+
+The remaining gap to the genetic algorithm is most likely the absence of
+diversity-aware survivor selection, where an individual's fitness combines its
+cost rank with its distance from the rest of the population. That is what the
+strongest solvers for this problem use, and it is a real research direction
+rather than a parameter change. It is not claimed here as done.
