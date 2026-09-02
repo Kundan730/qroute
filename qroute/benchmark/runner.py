@@ -260,6 +260,15 @@ def _dispatch(algo: str, inst, stop, seed: int, params: dict):
     if algo in ("random", "restart"):
         from qroute.benchmark.reference import RandomRestart
         return RandomRestart(inst, stop, seed, **params).solve()
+    # The two quantum rotation-gate engines are addressed directly rather than
+    # through the registry, so a benchmark can include them whether or not the
+    # registry has been extended.
+    if algo in ("qiea", "rotation"):
+        from qroute.algorithms.qiea import QIEA
+        return QIEA(inst, stop, seed, **params).solve()
+    if algo in ("qrk", "rotation_keys", "quantum_rotation_keys"):
+        from qroute.algorithms.qiea import QuantumRotationKeys
+        return QuantumRotationKeys(inst, stop, seed, **params).solve()
 
     from qroute.algorithms.registry import build
     return build(algo, inst, stop=stop, seed=seed, **params).solve()

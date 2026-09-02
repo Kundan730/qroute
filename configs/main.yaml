@@ -20,7 +20,7 @@ instances:
   - X-n101-k25
   - X-n153-k22
   - X-n200-k36
-algorithms: [qpso, pso, ga, sa, aco, random, ortools, pyvrp]
+algorithms: [qpso, qiea, pso, ga, sa, aco, random, ortools, pyvrp]
 seeds: 10
 master_seed: 20260920
 max_seconds: 20.0

@@ -53,16 +53,28 @@ export function BenchmarkPage() {
   }, [backend]);
 
   useEffect(() => {
-    if (!name || backend !== 'online') return;
-    setLoading(true);
-    setError(null);
-    getBenchmark(name)
-      .then(setDetail)
-      .catch((e: unknown) => {
+    if (!name || backend !== 'online') return undefined;
+    // `cancelled` guards against a slow response for a previously selected
+    // result set overwriting a newer one; the loading flag is raised inside the
+    // asynchronous body so the effect does not set state synchronously.
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const loaded = await getBenchmark(name);
+        if (!cancelled) setDetail(loaded);
+      } catch (e: unknown) {
+        if (cancelled) return;
         setDetail(null);
         setError(e instanceof ApiError ? e.message : String(e));
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [name, backend]);
 
   const perAlgorithm = useMemo(() => {
