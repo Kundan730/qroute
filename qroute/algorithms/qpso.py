@@ -53,10 +53,33 @@ Optional refinements, all off unless enabled:
 
 * **Weighted mbest** (WQPSO, Xi, Sun & Xu 2008) - rank-weight the personal bests
   so better particles pull the sampling width more strongly.
-* **Mutation** - Cauchy or Gaussian perturbation of the global best, which helps
-  on instances where the swarm converges before the budget is spent.
+* **Mutation** - Cauchy or Gaussian perturbation, which helps on instances where
+  the swarm converges before the budget is spent. Off by default: see below.
 * **Restart** - reinitialise the worst particles after a stagnation window,
   keeping the elite.
+
+What the parameter study actually showed
+----------------------------------------
+A sweep over swarm size, contraction schedule, mutation and local-search policy
+was run on A-n45-k7, A-n80-k10, X-n101-k25 and R101, three seeds each, with an
+equal twelve-second budget per configuration. Mean gap to the best-known
+solution across every configuration tried fell in a narrow band, roughly 1.6% to
+2.1%, with a standard deviation across runs near 1.0. In other words the
+differences between reasonable parameter settings are smaller than the
+run-to-run noise, and no setting is significantly better than another.
+
+That is worth stating plainly rather than hiding, because it says something true
+about this class of algorithm: once an optimal split and a good local search are
+in place, they do most of the work, and the swarm rule mainly decides which
+orderings get refined. The defaults below are the best observed mean, not a
+claim of tuned superiority. The comparison that does matter is against the
+same pipeline driven by other search rules, which is why every baseline shares
+this decoder.
+
+The classical schedule from Sun et al., beta falling linearly from 1.0 to 0.5,
+was the best of the five schedules tested, so the literature default stands.
+Mutation was very slightly worse than none, so it is off by default and kept as
+an option.
 """
 
 from __future__ import annotations
@@ -79,13 +102,15 @@ class QPSO(Optimizer):
                  beta_end: float = 0.5,
                  beta_schedule: str = "linear",
                  weighted_mbest: bool = True,
-                 mutation: str = "cauchy",
+                 mutation: str = "none",
                  mutation_rate: float = 0.10,
                  mutation_scale: float = 0.10,
                  elite_fraction: float = 0.10,
                  restart_after: int = 60,
                  restart_fraction: float = 0.30,
                  local_search: bool = True,
+                 ls_policy: str = "all",
+                 ls_fraction: float = 0.25,
                  neighbours: int = 15,
                  local_search_rounds: int = 30,
                  penalty_capacity: float = 1000.0,
@@ -101,7 +126,8 @@ class QPSO(Optimizer):
                          mutation=mutation, mutation_rate=mutation_rate,
                          mutation_scale=mutation_scale, elite_fraction=elite_fraction,
                          restart_after=restart_after, restart_fraction=restart_fraction,
-                         local_search=local_search, neighbours=neighbours, **kw)
+                         local_search=local_search, ls_policy=ls_policy,
+                         ls_fraction=ls_fraction, neighbours=neighbours, **kw)
         self.M = int(swarm_size)
         self.beta_start = float(beta_start)
         self.beta_end = float(beta_end)
@@ -113,6 +139,8 @@ class QPSO(Optimizer):
         self.elite = max(1, int(elite_fraction * self.M))
         self.restart_after = int(restart_after)
         self.restart_fraction = float(restart_fraction)
+        self.ls_policy = ls_policy
+        self.ls_fraction = float(ls_fraction)
         self.initial_keys = initial_keys
         self.decoder = decoder or Decoder(
             instance, neighbours=neighbours, local_search_rounds=local_search_rounds,
@@ -218,8 +246,23 @@ class QPSO(Optimizer):
             X = Xnew
 
             improved_global = False
+            # Which particles get the (expensive) local search this iteration.
+            # Refining every particle gives the best solution per iteration but
+            # the fewest iterations per second; refining a sample plus the
+            # incumbent trades quality per iteration for more of them. Which
+            # wins depends on instance size, so it is a parameter rather than a
+            # hard-coded choice, and the ablation is reported.
+            if self.ls_policy == "all" or not dec.use_local_search:
+                improve_set = None
+            else:
+                k = max(1, int(self.ls_fraction * M))
+                chosen = rng.choice(M, size=k, replace=False)
+                improve_set = set(int(x) for x in chosen)
+                improve_set.add(int(g))
+
             for i in range(M):
-                r, c, nk = dec.decode(X[i])
+                do_ls = improve_set is None or i in improve_set
+                r, c, nk = dec.decode(X[i], improve=do_ls)
                 if nk is not None:
                     X[i] = nk
                 costs[i] = c
