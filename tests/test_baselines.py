@@ -207,8 +207,6 @@ def test_all_algorithms_share_one_objective(instance):
 
 # ----------------------------------------------------------- adaptive penalty
 def test_penalty_initial_values_scale_with_the_instance(instance):
-    from qroute.algorithms.decoder import Decoder
-
     ap = AdaptivePenalty(instance)
     # The starting weight is the decoder's own instance-scaled default, so the
     # adaptive scheme begins exactly where a fixed-penalty run would.
@@ -292,8 +290,6 @@ def test_penalty_accepts_several_evidence_shapes():
 
 
 def test_penalty_applies_to_a_decoder(instance):
-    from qroute.algorithms.decoder import Decoder
-
     dec = Decoder(instance)
     ap = AdaptivePenalty(instance, capacity=7.0, time_window=8.0, duration=9.0)
     ap.apply_to(dec)
