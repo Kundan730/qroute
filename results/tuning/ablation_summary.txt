@@ -1,0 +1,15 @@
+
+Component ablation, 40 iterations x swarm 30 = 1200 evaluations, 5 seeds, 6 instances
+variant         mean gap %    median     best
+random-nols         150.34    144.57    61.61
+qpso-nols             1.80      1.75     0.09
+random-ls             1.41      1.29     0.00
+qpso-ls               1.84      1.78     0.09
+
+instance      random-nols    qpso-nols    random-ls      qpso-ls
+A-n45-k7            79.72         0.54         0.49         0.61
+A-n65-k9           159.28         0.89         0.77         0.82
+A-n80-k10          132.44         2.58         2.00         2.60
+B-n78-k10          179.67         2.34         2.39         2.47
+X-n101-k25          91.54         3.20         1.95         3.05
+P-n76-k4           259.39         1.25         0.84         1.52
