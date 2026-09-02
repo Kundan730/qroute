@@ -172,9 +172,9 @@ class AntColony(Optimizer):
                  local_search: bool = True,
                  neighbours: int = 15,
                  local_search_rounds: int = 30,
-                 penalty_capacity: float = 1000.0,
-                 penalty_time_window: float = 1000.0,
-                 penalty_duration: float = 1000.0,
+                 penalty_capacity: float | None = None,
+                 penalty_time_window: float | None = None,
+                 penalty_duration: float | None = None,
                  vehicle_cost: float = 0.0,
                  decoder: Decoder | None = None,
                  **kw):

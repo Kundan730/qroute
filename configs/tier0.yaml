@@ -1,0 +1,39 @@
+# Tier 0: instances small enough that an exact solver can close them, so the
+# heuristic's gap is measured against a proved optimum rather than against a
+# published best-known value that could in principle be improved.
+#
+# Every instance here has at most 33 customers. `qroute exact <name> --seconds 300`
+# proves optimality on most of them with CP-SAT, and P-n16-k8 is small enough
+# for the Held-Karp subset dynamic program.
+#
+# 10 instances x 6 algorithms x 10 seeds = 600 runs of 10 s, roughly 13 minutes
+# of wall clock on 8 workers.
+
+name: tier0
+instances:
+  - P-n16-k8
+  - P-n19-k2
+  - P-n20-k2
+  - P-n21-k2
+  - P-n22-k2
+  - P-n22-k8
+  - P-n23-k8
+  - A-n32-k5
+  - A-n33-k5
+  - B-n31-k5
+algorithms:
+  - qpso
+  - pso
+  - ga
+  - sa
+  - aco
+  - random
+seeds: 10
+master_seed: 20260920
+max_seconds: 10
+max_iterations: 1000000
+workers: 0
+params: {}
+output_dir: results/runs
+save_history: true
+history_stride: 1

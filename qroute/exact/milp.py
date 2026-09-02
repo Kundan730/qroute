@@ -294,9 +294,11 @@ def solve_cvrp_milp(
     needs another big-M block and makes an already weak model weaker, so the
     VRPTW path in this project goes through CP-SAT and the heuristics instead.
     """
-    if instance.has_time_windows:
+    if instance.has_time_windows or instance.max_route_duration is not None:
         raise NotImplementedError(
-            "the two-index MILP models capacity only; use qroute.exact.cpsat for VRPTW"
+            "the two-index MILP models capacity only; time windows and route-duration "
+            "limits are not represented. Use qroute.exact.cpsat for VRPTW and "
+            "qroute.baselines.ortools_gls for duration limits."
         )
     solver, backend_name = _pick_backend(backend, _MIP_BACKENDS)
     solver.SetTimeLimit(int(time_limit * 1000))
@@ -379,7 +381,7 @@ def lp_relaxation_value(
     Returns ``-inf`` if the LP could not be solved within the time limit, so a
     caller taking the maximum over several bounds is never misled.
     """
-    if instance.has_time_windows:
+    if instance.has_time_windows or instance.max_route_duration is not None:
         raise NotImplementedError("LP relaxation is defined for the capacity model only")
     solver, _name = _pick_backend(backend, _LP_BACKENDS)
     solver.SetTimeLimit(int(time_limit * 1000))

@@ -1,0 +1,35 @@
+# A two-minute smoke sweep: enough to prove the whole pipeline runs and writes
+# a report, small enough to sit through while a judge watches.
+#
+# The instances are deliberately medium-sized rather than tiny. Every algorithm
+# here finds the optimum of a 30-customer instance within a second, so a sweep
+# over those would produce a table of identical zeros and a degenerate Friedman
+# test; at 60 to 80 customers with a 5 s budget the algorithms actually separate.
+#
+# 4 instances x 5 algorithms x 3 seeds = 60 runs of 5 s. On 8 workers that is
+# about 50 seconds of wall clock including process start-up and JIT compilation.
+#
+#   qroute bench --config configs/quick.yaml
+#   qroute report results/runs/quick --plots
+
+name: quick
+instances:
+  - A-n60-k9
+  - A-n80-k10
+  - B-n64-k9
+  - P-n76-k5
+algorithms:
+  - qpso
+  - pso
+  - ga
+  - sa
+  - random
+seeds: 3
+master_seed: 20260920
+max_seconds: 5
+max_iterations: 1000000
+workers: 0            # 0 means os.cpu_count() - 2
+params: {}
+output_dir: results/runs
+save_history: true
+history_stride: 1

@@ -1,0 +1,47 @@
+# The Solomon VRPTW set: 100 customers each, with time windows and service
+# times. The three families test different things and all three are included --
+# C is clustered with wide windows, R is uniformly random, RC is a mixture --
+# and both the short-horizon (1xx) and long-horizon (2xx) variants appear,
+# because a long horizon makes the capacity constraint bind instead of the
+# windows.
+#
+# Time-window feasibility is handled by penalty rather than by rejection, so the
+# report's "feasible" column is the one to read first here: a cost below the
+# best-known value with a violation above zero is not a solution.
+#
+# 16 instances x 5 algorithms x 10 seeds = 800 runs of 30 s, roughly 50 minutes
+# of wall clock on 8 workers.
+
+name: vrptw
+instances:
+  - C101
+  - C103
+  - C105
+  - C201
+  - C204
+  - C208
+  - R101
+  - R104
+  - R107
+  - R110
+  - R201
+  - R205
+  - RC101
+  - RC105
+  - RC201
+  - RC205
+algorithms:
+  - qpso
+  - pso
+  - ga
+  - sa
+  - ortools
+seeds: 10
+master_seed: 20260920
+max_seconds: 30
+max_iterations: 1000000
+workers: 0
+params: {}
+output_dir: results/runs
+save_history: true
+history_stride: 2

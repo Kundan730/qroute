@@ -25,6 +25,21 @@ Pipeline, per edge, per call
 Everything above is one pass of NumPy arithmetic over arrays of length
 ``n_edges``; there is no Python loop over edges anywhere on this path.
 
+Known limitation, measured
+--------------------------
+Combining capacity-based incidents with BPR's quartic produces very large
+multipliers in deep oversaturation. Measured on the Bengaluru extract: a
+one-lane blockage on the 3-lane Hosur Road corridor at 19:00 leaves 49 percent
+of capacity, which raises saturation from about 1.5 to about 3.05 and takes the
+corridor from 1.80x free-flow travel time to 14.9x. The arithmetic is correct
+and the qualitative behaviour -- a blocked lane is nearly free at 03:00 and
+ruinous at 19:00 -- is right, but 14.9x overstates a real corridor, because BPR
+has no queue spillback or inflow metering to cap the degradation. Two honest
+mitigations: the router avoids such an edge long before the number matters (it
+reroutes at +21.7 percent, not +727 percent), and ``vdf="conical"`` bounds the
+growth linearly for anyone who needs the oversaturated regime to be credible in
+its own right.
+
 Network coupling
 ----------------
 ``qroute.graph.RoadNetwork`` is written by a different component and is
@@ -64,6 +79,10 @@ _CLASS_ATTRS = ("road_class", "road_classes", "highway", "edge_class")
 _LANES_ATTRS = ("lanes", "edge_lanes", "n_lanes")
 _LENGTH_ATTRS = ("length", "lengths", "edge_length")
 _KEYS_ATTRS = ("edge_keys", "edges", "edge_index")
+# A RoadNetwork that publishes its own capacity table is the authority on it:
+# two components disagreeing about how many vehicles an arterial carries would
+# be a silent, hard-to-find inconsistency. See TrafficSimulator's `capacity`.
+_CAPACITY_ATTRS = ("edge_capacity", "capacity", "edge_capacities")
 # Methods tried, in order, when pushing new weights back onto a network.
 _WRITEBACK_METHODS = (
     "update_travel_times",
@@ -88,6 +107,7 @@ class EdgeArrays:
     lanes: np.ndarray               # directional lane count, float
     length: np.ndarray              # metres
     keys: list                      # opaque per-edge identity, e.g. (u, v, k)
+    capacity: np.ndarray | None = None   # veh/h, when the network publishes one
 
     @property
     def n_edges(self) -> int:
@@ -220,7 +240,13 @@ def edge_arrays_from_network(network) -> EdgeArrays:
         )
         raw_keys = _first_attr(network, _KEYS_ATTRS)
         keys = list(raw_keys) if raw_keys is not None else list(range(n))
-        return EdgeArrays(t0, klass, lanes, length, keys)
+        raw_cap = _first_attr(network, _CAPACITY_ATTRS)
+        cap = None
+        if raw_cap is not None:
+            cap = np.asarray(raw_cap, dtype=np.float64)
+            if cap.shape != (n,):
+                cap = None
+        return EdgeArrays(t0, klass, lanes, length, keys, cap)
 
     for attr in ("graph", "G", "nx", "_graph"):
         inner = getattr(network, attr, None)
@@ -275,8 +301,21 @@ class TrafficSimulator:
         See the comment at the point of use; the choice moves the network mean
         by a factor of nearly 1.4 and is not cosmetic.
     capacity:
-        Optional explicit per-edge hourly capacity. When omitted it is derived
-        from road class and lane count.
+        Optional explicit per-edge hourly capacity. When omitted, the network's
+        own ``edge_capacity`` is used if it publishes one, and otherwise the
+        road-class table in :mod:`qroute.traffic.bpr`.
+
+        Be clear about what this does and does not affect. The demand model is
+        *saturation-first*: the profile emits ``v / c`` directly rather than an
+        absolute volume, so the absolute capacity cancels out of the travel
+        time and only *relative* changes to it -- an incident's capacity
+        multiplier -- move the answer. The absolute array is therefore used
+        only for the vehicle-kilometre weighting behind the reported network
+        averages. Two consequences worth knowing: a six-lane and a two-lane
+        primary road are equally congested at the same hour under this model,
+        and the 1.75 peak calibration is unaffected by which capacity table is
+        chosen. Making lane count move congestion would need per-link counted
+        volumes, which no open dataset supplied here provides.
 
     Reproducibility is by construction, not by convention: the noise is a
     pre-generated field indexed by time rather than a stream consumed as the
@@ -314,11 +353,18 @@ class TrafficSimulator:
         self._cache: tuple[Any, np.ndarray] | None = None
 
         n = self.edges.n_edges
-        self.base_capacity = (
-            np.asarray(capacity, dtype=np.float64)
-            if capacity is not None
-            else _bpr.edge_capacity(self.edges.road_class, self.edges.lanes)
-        )
+        # Precedence: an explicit argument, then the network's own published
+        # capacity, then this module's road-class table. Deferring to the
+        # network keeps a single source of truth when qroute.graph supplies one.
+        if capacity is not None:
+            self.base_capacity = np.asarray(capacity, dtype=np.float64)
+            self.capacity_source = "explicit"
+        elif self.edges.capacity is not None:
+            self.base_capacity = np.asarray(self.edges.capacity, dtype=np.float64)
+            self.capacity_source = "network"
+        else:
+            self.base_capacity = _bpr.edge_capacity(self.edges.road_class, self.edges.lanes)
+            self.capacity_source = "traffic.bpr"
         if self.base_capacity.shape != (n,):
             raise ValueError(f"capacity must have shape ({n},)")
         self.sensitivity = class_sensitivity_array(self.edges.road_class)

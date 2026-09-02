@@ -1,0 +1,50 @@
+# Tier 1: the medium CVRPLIB instances (sets A, B and P, 33 to 100 customers)
+# whose optimal values are known and published. This is the sweep the main
+# results table is built from, and the one the statistical comparison uses:
+# 20 instances is enough for the Friedman test to have real power.
+#
+# OR-Tools is included as the reference solver. It is deterministic, so its ten
+# seeds produce ten identical rows; the runner labels it and the report should
+# be read with that in mind.
+#
+# 20 instances x 6 algorithms x 10 seeds = 1200 runs of 30 s, roughly 75 minutes
+# of wall clock on 8 workers.
+
+name: tier1
+instances:
+  - A-n37-k5
+  - A-n39-k5
+  - A-n45-k6
+  - A-n46-k7
+  - A-n48-k7
+  - A-n53-k7
+  - A-n60-k9
+  - A-n62-k8
+  - A-n65-k9
+  - A-n80-k10
+  - B-n45-k5
+  - B-n50-k7
+  - B-n57-k9
+  - B-n64-k9
+  - B-n78-k10
+  - P-n50-k7
+  - P-n55-k7
+  - P-n70-k10
+  - P-n76-k5
+  - P-n101-k4
+algorithms:
+  - qpso
+  - pso
+  - ga
+  - sa
+  - aco
+  - ortools
+seeds: 10
+master_seed: 20260920
+max_seconds: 30
+max_iterations: 1000000
+workers: 0
+params: {}
+output_dir: results/runs
+save_history: true
+history_stride: 2

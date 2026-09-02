@@ -7,12 +7,14 @@ and adds the two things the graph itself cannot provide:
 
 * **A CSR adjacency** so that shortest paths and many-to-many matrices run in
   compiled code (``scipy.sparse.csgraph``) instead of in Python dictionaries.
-  On the bundled Bengaluru extract this is the difference between a 200x200
-  matrix taking seconds and taking tens of milliseconds.
+  On the bundled Bengaluru extract this is worth a factor of 12-14 on a
+  many-source solve (see :mod:`qroute.graph.matrix`).
 * **An O(E) dynamic weight update.** Live traffic changes edge travel times
   every few seconds. Rebuilding the CSR from the NetworkX graph each time would
   dominate the runtime, so the sparsity structure is built exactly once and
-  :meth:`RoadNetwork.update_weights` only overwrites the ``data`` arrays.
+  :meth:`RoadNetwork.update_weights` only overwrites the ``data`` arrays. On the
+  Bengaluru extract (34266 edges) one update takes about 1 ms, against roughly
+  2.9 s to load and build the network from scratch.
 
 Design notes
 ------------
@@ -84,7 +86,13 @@ class RoadNetwork:
     """
 
     # ------------------------------------------------------------------ build
-    def __init__(self, graph: nx.MultiDiGraph, name: str | None = None) -> None:
+    def __init__(self, graph: nx.MultiDiGraph | str | Path, name: str | None = None) -> None:
+        if isinstance(graph, (str, Path)):
+            # Convenience: RoadNetwork("data/osm/x.graphml") loads and cleans the
+            # file. Other components discover this class by name and call it
+            # with a path, so accepting one avoids a fragile hand-off.
+            name = name or Path(str(graph)).stem
+            graph = osm_mod.load_graph(graph)
         if graph.number_of_nodes() == 0:
             raise ValueError("cannot build a RoadNetwork from an empty graph")
         self.graph = graph
@@ -114,9 +122,12 @@ class RoadNetwork:
         speed = np.empty(m, dtype=np.float64)
         capacity = np.empty(m, dtype=np.float64)
         importance = np.empty(m, dtype=np.int8)
+        lanes = np.empty(m, dtype=np.float64)
         classes: list[str] = []
         geometries: list[object] = []
+        keys: list[tuple[int, int, int]] = []
         for i, (u, v, k, data) in enumerate(graph.edges(keys=True, data=True)):
+            keys.append((int(u), int(v), int(k)))
             eu[i] = self._index_of[int(u)]
             ev[i] = self._index_of[int(v)]
             ekey[i] = int(k)
@@ -131,6 +142,7 @@ class RoadNetwork:
                 data.get("capacity", osm_mod.DEFAULT_CAPACITY_VEH_PER_HOUR_PER_LANE)
             )
             importance[i] = osm_mod.CLASS_IMPORTANCE.get(cls, osm_mod.DEFAULT_IMPORTANCE)
+            lanes[i] = float(data.get("lanes_used", osm_mod.parse_lanes(data.get("lanes"))))
             geometries.append(data.get("geometry"))
 
         self._edge_u = eu
@@ -142,7 +154,9 @@ class RoadNetwork:
         self._edge_capacity = capacity
         self._edge_class = np.array(classes, dtype=object)
         self._edge_importance = importance
+        self._edge_lanes = lanes
         self._edge_geometry = geometries
+        self._edge_keys = keys
 
         # Live state: current travel time and congestion level per edge.
         self._edge_travel_time = self._edge_free_flow_time.copy()
@@ -275,6 +289,32 @@ class RoadNetwork:
     def edge_classes(self) -> np.ndarray:
         """Object array of OSM highway class strings, one per edge."""
         return self._edge_class
+
+    @property
+    def edge_lanes(self) -> np.ndarray:
+        """Directional lane count per edge (1 where OSM does not tag it)."""
+        return self._edge_lanes
+
+    @property
+    def edge_keys(self) -> list[tuple[int, int, int]]:
+        """``(u, v, key)`` identity of each edge, in the array order."""
+        return self._edge_keys
+
+    # Interop aliases. The traffic layer discovers a road network's arrays by
+    # attribute name from a list it owns; these aliases let it bind to the
+    # correct arrays without either module importing the other. They are
+    # read-only views of the arrays above, not copies.
+    @property
+    def free_flow_time(self) -> np.ndarray:
+        return self._edge_free_flow_time
+
+    @property
+    def edge_class(self) -> np.ndarray:
+        return self._edge_class
+
+    @property
+    def length(self) -> np.ndarray:
+        return self._edge_length
 
     def edge_endpoints(self) -> tuple[np.ndarray, np.ndarray]:
         """``(tail, head)`` internal node indices, one entry per edge."""

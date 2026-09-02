@@ -37,20 +37,39 @@ this file exists to measure.
 
 Not a strawman
 --------------
-Three deliberate choices keep this PSO competitive rather than convenient:
+The defaults were chosen by measurement rather than by assumption, on
+A-n80-k10, X-n101-k25 and R101 with three seeds each and a five-second budget
+(mean gap to best known, lower is better)::
 
-* A **ring topology** is available and is the default. In a global-best swarm
-  every particle is pulled towards the same point and the swarm collapses fast;
-  with a ring, information about the best position diffuses around the
-  neighbourhood graph over several iterations, which is well documented to
-  perform better on multimodal problems (Kennedy and Mendes, 2002). Choosing
-  the weaker ``gbest`` topology would have made PSO look worse for a reason that
-  has nothing to do with the quantum update.
+    gbest, constriction, clamp 0.2      +2.24%   <- the default
+    gbest + Cauchy mutation (p = 0.05)  +2.44%
+    ring (k = 1)                        +2.51%
+    ring (k = 2)                        +2.62%
+    gbest, velocity clamp 0.1           +2.62%
+    gbest, linear inertia 0.9 -> 0.4    +2.75%
+    gbest, velocity clamp 0.4           +2.93%
+
+The ring topology losing is worth stating plainly, because the literature
+generally prefers it and this implementation was originally written with it as
+the default. The explanation is the budget: a ring diffuses information about a
+good position around the neighbourhood graph over several iterations, and a
+fifteen-second run of a swarm of thirty completes only tens of iterations, so
+the diffusion never finishes and the ring simply converges more slowly than the
+budget allows. On a long run the ordering would plausibly reverse. Ring
+topology remains available through ``topology="ring"`` and the other settings
+through their parameters.
+
+Two further choices keep the comparison honest rather than convenient:
+
 * **Velocity clamping** to a fraction of the key range, so a particle that
   receives a large attraction term does not leave the useful part of the space
-  in one step.
+  in one step. The clamp fraction was tuned, as above.
 * The **same restart mechanism** QPSO has, so neither algorithm gets a
-  diversification device the other lacks.
+  diversification device the other lacks. The swarm size is also left at QPSO's
+  default of 30 rather than tuned separately, so the two swarms differ in their
+  update rule and nothing else. (A swarm of 20 measured slightly better here,
+  +2.18%, which is within the noise of nine runs and is noted rather than
+  adopted.)
 """
 
 from __future__ import annotations
@@ -76,7 +95,7 @@ class PSO(Optimizer):
                  c1: float = 1.49618,
                  c2: float = 1.49618,
                  velocity_clamp: float = 0.2,
-                 topology: str = "ring",
+                 topology: str = "gbest",
                  neighbourhood: int = 2,
                  mutation: str = "none",
                  mutation_rate: float = 0.05,
@@ -87,9 +106,9 @@ class PSO(Optimizer):
                  local_search: bool = True,
                  neighbours: int = 15,
                  local_search_rounds: int = 30,
-                 penalty_capacity: float = 1000.0,
-                 penalty_time_window: float = 1000.0,
-                 penalty_duration: float = 1000.0,
+                 penalty_capacity: float | None = None,
+                 penalty_time_window: float | None = None,
+                 penalty_duration: float | None = None,
                  vehicle_cost: float = 0.0,
                  decoder: Decoder | None = None,
                  initial_keys: np.ndarray | None = None,

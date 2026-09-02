@@ -98,9 +98,13 @@ class _RotationOptimizer(Optimizer):
                  local_search: bool = True,
                  neighbours: int = 15,
                  local_search_rounds: int = 30,
-                 penalty_capacity: float = 1000.0,
-                 penalty_time_window: float = 1000.0,
-                 penalty_duration: float = 1000.0,
+                 # Left as None so the decoder derives penalties from the
+                 # instance's own cost and demand scale. A hard-coded weight is
+                 # wrong by orders of magnitude on a road network measured in
+                 # seconds, where route costs run past 100,000.
+                 penalty_capacity: float | None = None,
+                 penalty_time_window: float | None = None,
+                 penalty_duration: float | None = None,
                  vehicle_cost: float = 0.0,
                  decoder: Decoder | None = None,
                  **kw):

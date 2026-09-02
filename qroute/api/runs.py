@@ -1,0 +1,879 @@
+"""Running solvers out of process and streaming their convergence to the browser.
+
+Why a separate process
+----------------------
+A solver is a tight numeric loop that holds the GIL for seconds at a time. Run
+inside the web server it would freeze every other request, including the one
+asking it to stop. Each run therefore gets its own operating-system process:
+the server stays responsive, a run can be cancelled by terminating it, and a
+solver that segfaults in a compiled kernel takes only itself down.
+
+macOS uses the ``spawn`` start method, which means the child re-imports the
+package and unpickles its arguments rather than inheriting them. Everything
+handed to a worker is therefore plain data or a picklable object, and the worker
+entry point is a module-level function - a closure or a bound method would not
+survive the trip.
+
+How progress gets back
+----------------------
+Every optimiser accepts ``callback=fn(IterationRecord)``. The worker installs a
+callback that pushes a small dictionary onto a :class:`multiprocessing.Manager`
+queue. A manager queue is used rather than a plain ``multiprocessing.Queue``
+because the queue then lives in the manager process, so terminating a cancelled
+worker cannot leave a half-written record in a shared buffer.
+
+On the server side one daemon thread per run drains that queue into the run
+record. Endpoints and the SSE generator only ever read the record, so they never
+block on the queue.
+
+Throttling
+----------
+An interior-point iteration of QPSO on a 100-customer instance takes a few
+milliseconds, so an unthrottled stream would emit hundreds of events a second -
+far more than a browser can draw and enough to make the SSE connection itself
+the bottleneck. The worker therefore emits at most :data:`MAX_EVENTS_PER_SECOND`
+ticks, always including the first and the last, and attaches the full route
+list only when the incumbent actually improved. The *complete* history is still
+recorded by the optimiser and returned when the run finishes, so throttling
+costs the live view some frames but costs the reported convergence curve
+nothing.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+import logging
+import multiprocessing as mp
+import os
+import queue as queue_mod
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Iterator, Optional
+
+import numpy as np
+
+from qroute.api.state import STATE, ApiState, StoredInstance
+
+log = logging.getLogger("qroute.api.runs")
+
+#: Upper bound on live SSE ticks per second, per run.
+MAX_EVENTS_PER_SECOND: float = 10.0
+
+#: How many runs may execute at once. Each pins one core; the machine also has
+#: to serve the API and, during a demonstration, a browser.
+MAX_ACTIVE_RUNS: int = 4
+
+#: Algorithms that are not :class:`~qroute.algorithms.base.Optimizer` subclasses
+#: and therefore cannot report per-iteration progress. They still run, and still
+#: return a full result; the stream simply carries no ticks for them.
+NON_STREAMING = {"ortools", "ortools_gls", "pyvrp", "hgs", "cpsat", "exact"}
+
+
+# --------------------------------------------------------------------------
+# Algorithm catalogue
+# --------------------------------------------------------------------------
+
+#: Bounds, steps and one-line explanations for the parameters the UI exposes.
+#: Only presentation metadata lives here - the defaults and the set of
+#: parameters themselves are read from each solver's signature, so this table
+#: can never claim a parameter that does not exist.
+_PARAM_META: dict[str, dict[str, Any]] = {
+    "swarm_size": {"min": 5, "max": 200, "step": 1, "description": "Number of particles."},
+    "population": {"min": 10, "max": 300, "step": 1, "description": "Number of individuals."},
+    "n_ants": {"min": 2, "max": 100, "step": 1, "description": "Ants released per iteration."},
+    "beta_start": {"min": 0.2, "max": 1.8, "step": 0.05,
+                   "description": "Initial contraction-expansion coefficient."},
+    "beta_end": {"min": 0.1, "max": 1.8, "step": 0.05,
+                 "description": "Final contraction-expansion coefficient."},
+    "beta_schedule": {"choices": ["linear", "exponential", "fixed"],
+                      "description": "How beta moves from start to end."},
+    "weighted_mbest": {"description": "Weight the mean best position by fitness rank."},
+    "mutation": {"choices": ["none", "gaussian", "cauchy"],
+                 "description": "Perturbation applied to the random keys."},
+    "mutation_rate": {"min": 0.0, "max": 1.0, "step": 0.01},
+    "mutation_scale": {"min": 0.0, "max": 1.0, "step": 0.01},
+    "elite_fraction": {"min": 0.0, "max": 0.5, "step": 0.01,
+                       "description": "Share of the population protected from restarts."},
+    "restart_after": {"min": 0, "max": 500, "step": 1,
+                      "description": "Stagnant iterations before a partial restart; 0 disables."},
+    "restart_fraction": {"min": 0.0, "max": 1.0, "step": 0.05},
+    "local_search": {"description": "Refine decoded routes with 2-opt / Or-opt."},
+    "ls_policy": {"choices": ["all", "sample"],
+                  "description": "Refine every particle, or a sample plus the incumbent."},
+    "ls_fraction": {"min": 0.0, "max": 1.0, "step": 0.05},
+    "neighbours": {"min": 5, "max": 40, "step": 1,
+                   "description": "Granular neighbourhood size for local search."},
+    "local_search_rounds": {"min": 1, "max": 200, "step": 1},
+    "inertia": {"choices": ["constriction", "linear", "fixed"]},
+    "topology": {"choices": ["ring", "gbest"]},
+    "crossover": {"choices": ["ox", "blend", "uniform", "mixed"]},
+    "w": {"min": 0.0, "max": 1.5, "step": 0.01},
+    "c1": {"min": 0.0, "max": 4.0, "step": 0.01},
+    "c2": {"min": 0.0, "max": 4.0, "step": 0.01},
+    "alpha": {"min": 0.0, "max": 5.0, "step": 0.001},
+    "beta": {"min": 0.0, "max": 10.0, "step": 0.1},
+    "q0": {"min": 0.0, "max": 1.0, "step": 0.01},
+    "rho": {"min": 0.0, "max": 1.0, "step": 0.01},
+    "xi": {"min": 0.0, "max": 1.0, "step": 0.01},
+    "tournament_size": {"min": 2, "max": 10, "step": 1},
+    "penalty_capacity": {"min": 0.0, "max": 1e6, "step": 10.0},
+    "penalty_time_window": {"min": 0.0, "max": 1e6, "step": 10.0},
+    "penalty_duration": {"min": 0.0, "max": 1e6, "step": 10.0},
+    "vehicle_cost": {"min": 0.0, "max": 1e6, "step": 1.0,
+                     "description": "Fixed cost charged per route used."},
+    "seconds": {"min": 0.1, "max": 600.0, "step": 0.5},
+}
+
+#: Constructor arguments that are plumbing rather than tuning, and must never be
+#: offered to the browser: they are objects, not values.
+_HIDDEN_PARAMS = {"self", "instance", "stop", "seed", "callback", "decoder", "initial_keys", "kw"}
+
+#: Solvers that are reached through the benchmark runner's dispatcher rather
+#: than through the algorithm registry.
+_EXTRA_ALGORITHMS: list[tuple[str, str, str]] = [
+    ("random", "Multi-start local search: the control the search rules are judged against",
+     "reference"),
+    ("ortools", "OR-Tools routing with guided local search (industrial baseline)", "baseline"),
+    ("pyvrp", "PyVRP hybrid genetic search (state of the art for CVRP/VRPTW)", "baseline"),
+    ("cpsat", "CP-SAT exact model; proves optimality on small instances", "exact"),
+]
+
+
+def _param_specs(cls: type) -> list[dict[str, Any]]:
+    """Derive the tunable-parameter list of a solver from its signature."""
+    specs: list[dict[str, Any]] = []
+    try:
+        signature = inspect.signature(cls.__init__)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return specs
+    for name, param in signature.parameters.items():
+        if name in _HIDDEN_PARAMS or param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        default = param.default
+        if default is inspect.Parameter.empty:
+            continue
+        meta = dict(_PARAM_META.get(name, {}))
+        if isinstance(default, bool):
+            kind = "bool"
+        elif isinstance(default, int):
+            kind = "int"
+        elif isinstance(default, float):
+            kind = "float"
+        elif isinstance(default, str):
+            kind = "choice" if meta.get("choices") else "text"
+        else:
+            # Tuples and anything else are not representable in a simple form;
+            # showing a control that cannot set them would be worse than
+            # omitting them.
+            continue
+        specs.append(
+            {
+                "name": name,
+                "kind": kind,
+                "default": default,
+                "min": meta.get("min"),
+                "max": meta.get("max"),
+                "step": meta.get("step"),
+                "choices": meta.get("choices"),
+                "description": meta.get("description"),
+            }
+        )
+    return specs
+
+
+def algorithm_catalogue() -> list[dict[str, Any]]:
+    """Every solver the run endpoint accepts, with its parameter schema.
+
+    Resolving a registry name imports its module, which pulls in the compiled
+    kernels. That is the same import the warm-up already paid for, so listing
+    the catalogue is cheap after startup and merely slow-ish before it.
+    """
+    from qroute.algorithms.registry import DESCRIPTIONS, get, names
+
+    out: list[dict[str, Any]] = []
+    for name in names():
+        try:
+            cls = get(name)
+            params = _param_specs(cls)
+            warm = "initial_keys" in inspect.signature(cls.__init__).parameters
+        except Exception:  # pragma: no cover - a broken solver must still list
+            log.exception("could not introspect algorithm %s", name)
+            params, warm = [], False
+        out.append(
+            {
+                "name": name,
+                "description": DESCRIPTIONS.get(name, ""),
+                "kind": "metaheuristic",
+                "supports_warm_start": warm,
+                "params": params,
+            }
+        )
+
+    for name, description, kind in _EXTRA_ALGORITHMS:
+        entry: dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "kind": kind,
+            "supports_warm_start": False,
+            "params": [],
+        }
+        if name == "random":
+            try:
+                from qroute.benchmark.reference import RandomRestart
+
+                entry["params"] = _param_specs(RandomRestart)
+            except Exception:  # pragma: no cover
+                log.exception("could not introspect the random-restart control")
+        if name == "pyvrp":
+            from qroute.baselines import pyvrp_hgs
+
+            entry["available"] = pyvrp_hgs.available()
+        out.append(entry)
+    return out
+
+
+def known_algorithms() -> set[str]:
+    from qroute.algorithms.registry import names
+
+    return set(names()) | {n for n, _d, _k in _EXTRA_ALGORITHMS} | NON_STREAMING | {"restart"}
+
+
+# --------------------------------------------------------------------------
+# Worker
+# --------------------------------------------------------------------------
+
+
+def _emit(progress_queue, message: dict[str, Any]) -> None:
+    """Push one message, tolerating a queue whose other end has gone away."""
+    try:
+        progress_queue.put(message)
+    except Exception:  # pragma: no cover - only on an already-dead manager
+        pass
+
+
+def solver_worker(payload: dict[str, Any], progress_queue) -> None:
+    """Entry point of a solver process. Must stay importable and picklable.
+
+    ``payload`` carries the instance itself (a small object of NumPy arrays),
+    the algorithm name, its parameters, the seed and the stopping rule. The
+    function never returns a value; everything travels back over the queue.
+    """
+    # One thread per solver, so a wall-clock budget means the same thing here as
+    # it does in the benchmark runner.
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                "NUMBA_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(var, "1")
+
+    started = time.perf_counter()
+    try:
+        from qroute.algorithms.base import StopCriteria
+
+        instance = payload["instance"]
+        algorithm = str(payload["algorithm"]).lower()
+        params = dict(payload.get("params") or {})
+        seed = int(payload["seed"])
+        stop = StopCriteria(
+            max_iterations=int(payload.get("max_iterations", 1_000_000)),
+            max_seconds=float(payload.get("max_seconds", 10.0)),
+        )
+        initial_keys = payload.get("initial_keys")
+
+        interval = 1.0 / MAX_EVENTS_PER_SECOND
+        holder: dict[str, Any] = {"optimizer": None, "last_emit": 0.0, "last_routes_cost": None}
+
+        def callback(record) -> None:
+            now = time.perf_counter()
+            due = (record.iteration <= 1) or (now - holder["last_emit"] >= interval)
+            optimizer = holder["optimizer"]
+            # The incumbent is the optimiser's own ``_best``; reading it is the
+            # only way to attach geometry to a tick, because IterationRecord
+            # carries costs but no routes.
+            best = getattr(optimizer, "_best", None) if optimizer is not None else None
+            improved = (
+                best is not None
+                and best.routes
+                and (
+                    holder["last_routes_cost"] is None
+                    or best.cost < holder["last_routes_cost"] - 1e-9
+                )
+            )
+            if not due and not improved:
+                return
+            holder["last_emit"] = now
+            message: dict[str, Any] = {
+                "type": "tick",
+                "iteration": int(record.iteration),
+                "elapsed": float(record.elapsed),
+                "evaluations": int(record.evaluations),
+                "best_cost": float(record.best_cost),
+                "mean_cost": float(record.mean_cost),
+                "diversity": float(record.diversity),
+                "feasible": bool(record.feasible),
+            }
+            if improved:
+                message["routes"] = [[int(c) for c in r] for r in best.routes]
+                holder["last_routes_cost"] = float(best.cost)
+            _emit(progress_queue, message)
+
+        result = _build_and_solve(
+            algorithm, instance, stop, seed, params, callback, holder, initial_keys
+        )
+        payload_out = result.to_json()
+        payload_out["bks"] = instance.meta.get("bks")
+        _emit(progress_queue, {"type": "done", "result": payload_out})
+    except Exception as exc:
+        import traceback
+
+        _emit(
+            progress_queue,
+            {
+                "type": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+                "traceback": traceback.format_exc()[-4000:],
+                "seconds": time.perf_counter() - started,
+            },
+        )
+
+
+def _build_and_solve(algorithm, instance, stop, seed, params, callback, holder, initial_keys):
+    """Dispatch a name to a solver call returning an ``OptimizationResult``.
+
+    Mirrors :func:`qroute.benchmark.runner._dispatch` so that a run started from
+    the web UI and the same run started from the benchmark runner execute
+    identical code paths, which is the only way the live demonstration and the
+    reported benchmark numbers can be claimed to measure the same thing.
+    """
+    if algorithm in ("ortools", "ortools_gls"):
+        from qroute.baselines.ortools_gls import solve_ortools
+
+        return solve_ortools(instance, seconds=stop.max_seconds, **params)
+    if algorithm in ("pyvrp", "hgs"):
+        from qroute.baselines.pyvrp_hgs import solve_pyvrp
+
+        return solve_pyvrp(instance, seconds=stop.max_seconds, seed=seed, **params)
+    if algorithm in ("cpsat", "exact"):
+        from qroute.exact.cpsat import solve_cpsat
+
+        return solve_cpsat(instance, seconds=stop.max_seconds, **params)
+    if algorithm in ("random", "restart"):
+        from qroute.benchmark.reference import RandomRestart
+
+        optimizer = RandomRestart(instance, stop, seed, callback, **params)
+    else:
+        from qroute.algorithms.registry import build
+
+        if initial_keys is not None:
+            params = dict(params)
+            params["initial_keys"] = np.asarray(initial_keys, dtype=np.float64)
+        optimizer = build(algorithm, instance, stop=stop, seed=seed, callback=callback, **params)
+    holder["optimizer"] = optimizer
+    return optimizer.solve()
+
+
+# --------------------------------------------------------------------------
+# Server-side run records
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class RunRecord:
+    """Everything the API knows about one run."""
+
+    run_id: str
+    algorithm: str
+    instance_name: str
+    seed: int
+    max_seconds: float
+    max_iterations: int
+    params: dict[str, Any] = field(default_factory=dict)
+    state: str = "queued"
+    created_at: float = field(default_factory=time.time)
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
+    ticks: list[dict[str, Any]] = field(default_factory=list)
+    result: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+    bks: Optional[float] = None
+    parent_run_id: Optional[str] = None
+    warm_started: bool = False
+    baseline_cost: Optional[float] = None
+    network_id: Optional[str] = None
+    _geojson: Optional[dict[str, Any]] = None
+    _geojson_built: bool = False
+
+    def __post_init__(self) -> None:
+        self.lock = threading.Lock()
+        self.process: Optional[mp.process.BaseProcess] = None
+        self.reader: Optional[threading.Thread] = None
+
+    # -------------------------------------------------------------- reading
+    @property
+    def is_terminal(self) -> bool:
+        return self.state in ("done", "cancelled", "failed")
+
+    def ticks_from(self, index: int) -> list[dict[str, Any]]:
+        with self.lock:
+            return list(self.ticks[index:])
+
+    def best_tick(self) -> Optional[dict[str, Any]]:
+        with self.lock:
+            return self.ticks[-1] if self.ticks else None
+
+
+class RunRegistry:
+    """Owns the run records, the worker processes and their reader threads."""
+
+    def __init__(self, state: ApiState | None = None, max_active: int = MAX_ACTIVE_RUNS):
+        self.state = state or STATE
+        self.max_active = max_active
+        self._runs: "dict[str, RunRecord]" = {}
+        self._lock = threading.Lock()
+        self._manager: Optional[Any] = None
+        self._context = mp.get_context("spawn")
+
+    # -------------------------------------------------------------- plumbing
+    def _queue(self):
+        """One manager for the process, created on first use.
+
+        Starting a manager forks a helper process, which costs about fifty
+        milliseconds. Doing it at import time would slow every ``qroute``
+        command that merely imports the API; doing it per run would show up in
+        the latency of ``POST /api/runs``.
+        """
+        with self._lock:
+            if self._manager is None:
+                self._manager = self._context.Manager()
+        return self._manager.Queue()
+
+    def active_count(self) -> int:
+        with self._lock:
+            return sum(1 for r in self._runs.values() if not r.is_terminal)
+
+    def get(self, run_id: str) -> Optional[RunRecord]:
+        with self._lock:
+            return self._runs.get(run_id)
+
+    def all_runs(self) -> list[RunRecord]:
+        with self._lock:
+            return list(self._runs.values())
+
+    def shutdown(self) -> None:
+        """Terminate every live worker; called from the application's lifespan."""
+        for record in self.all_runs():
+            self.cancel(record.run_id)
+        with self._lock:
+            manager = self._manager
+            self._manager = None
+        if manager is not None:
+            try:
+                manager.shutdown()
+            except Exception:  # pragma: no cover
+                pass
+
+    # --------------------------------------------------------------- start
+    def start(
+        self,
+        *,
+        stored: StoredInstance,
+        algorithm: str,
+        seed: int,
+        max_seconds: float,
+        max_iterations: int,
+        params: dict[str, Any] | None = None,
+        initial_keys: Optional[np.ndarray] = None,
+        parent_run_id: Optional[str] = None,
+        baseline_cost: Optional[float] = None,
+    ) -> RunRecord:
+        """Launch a solver process and return its record.
+
+        Raises ``RuntimeError`` when the concurrency limit is reached, which the
+        endpoint turns into a 429.
+        """
+        if self.active_count() >= self.max_active:
+            raise RuntimeError(
+                f"{self.max_active} runs are already in flight; cancel one or wait"
+            )
+
+        instance = stored.instance
+        record = RunRecord(
+            run_id=uuid.uuid4().hex[:12],
+            algorithm=algorithm,
+            instance_name=stored.name,
+            seed=int(seed),
+            max_seconds=float(max_seconds),
+            max_iterations=int(max_iterations),
+            params=dict(params or {}),
+            bks=float(instance.meta["bks"]) if instance.meta.get("bks") else None,
+            parent_run_id=parent_run_id,
+            warm_started=initial_keys is not None,
+            baseline_cost=baseline_cost,
+            network_id=stored.network_id,
+        )
+
+        progress_queue = self._queue()
+        payload = {
+            "instance": instance,
+            "algorithm": algorithm,
+            "params": dict(params or {}),
+            "seed": int(seed),
+            "max_seconds": float(max_seconds),
+            "max_iterations": int(max_iterations),
+            "initial_keys": None if initial_keys is None else np.asarray(initial_keys),
+        }
+        process = self._context.Process(
+            target=solver_worker,
+            args=(payload, progress_queue),
+            name=f"qroute-run-{record.run_id}",
+            daemon=True,
+        )
+        record.process = process
+        record.state = "running"
+        record.started_at = time.time()
+        process.start()
+
+        reader = threading.Thread(
+            target=self._drain,
+            args=(record, progress_queue),
+            name=f"qroute-reader-{record.run_id}",
+            daemon=True,
+        )
+        record.reader = reader
+        reader.start()
+
+        with self._lock:
+            self._runs[record.run_id] = record
+        log.info(
+            "run %s started: %s on %s (seed %d, %.1fs)",
+            record.run_id, algorithm, stored.name, seed, max_seconds,
+        )
+        return record
+
+    # --------------------------------------------------------------- drain
+    def _drain(self, record: RunRecord, progress_queue) -> None:
+        """Move messages from the worker's queue into the record, until it ends.
+
+        The loop is written so that a worker which dies without sending anything
+        - terminated by a cancel, or killed by the operating system - still ends
+        the run rather than leaving it "running" forever.
+        """
+        process = record.process
+        deadline = time.time() + record.max_seconds + 300.0
+        while True:
+            try:
+                message = progress_queue.get(timeout=0.2)
+            except queue_mod.Empty:
+                if process is not None and not process.is_alive():
+                    # Give the queue one last chance: the child may have written
+                    # its result microseconds before exiting.
+                    try:
+                        message = progress_queue.get(timeout=0.2)
+                    except queue_mod.Empty:
+                        with record.lock:
+                            if not record.is_terminal:
+                                record.state = "cancelled" if record.state == "cancelling" else "failed"
+                                if record.state == "failed" and record.error is None:
+                                    record.error = (
+                                        f"solver process exited with code {process.exitcode} "
+                                        "without returning a result"
+                                    )
+                                record.finished_at = time.time()
+                        break
+                if time.time() > deadline:  # pragma: no cover - safety valve
+                    with record.lock:
+                        record.state = "failed"
+                        record.error = "the solver process stopped responding"
+                        record.finished_at = time.time()
+                    break
+                continue
+            except (EOFError, OSError, BrokenPipeError):  # pragma: no cover
+                with record.lock:
+                    if not record.is_terminal:
+                        record.state = "failed"
+                        record.error = "lost contact with the solver process"
+                        record.finished_at = time.time()
+                break
+
+            kind = message.get("type")
+            if kind == "tick":
+                with record.lock:
+                    record.ticks.append(message)
+            elif kind == "done":
+                with record.lock:
+                    record.result = message["result"]
+                    if record.bks is None and message["result"].get("bks"):
+                        record.bks = float(message["result"]["bks"])
+                    record.state = "done" if record.state != "cancelling" else "cancelled"
+                    record.finished_at = time.time()
+                break
+            elif kind == "error":
+                log.error(
+                    "run %s failed: %s\n%s",
+                    record.run_id, message.get("error"), message.get("traceback", ""),
+                )
+                with record.lock:
+                    record.error = str(message.get("error"))
+                    record.state = "failed"
+                    record.finished_at = time.time()
+                break
+
+        if process is not None:
+            process.join(timeout=5.0)
+            if process.is_alive():  # pragma: no cover - defensive
+                process.terminate()
+
+    # -------------------------------------------------------------- cancel
+    def cancel(self, run_id: str) -> Optional[RunRecord]:
+        record = self.get(run_id)
+        if record is None:
+            return None
+        with record.lock:
+            if record.is_terminal:
+                return record
+            record.state = "cancelling"
+        process = record.process
+        if process is not None and process.is_alive():
+            process.terminate()
+        # The reader thread notices the dead process and settles the state; wait
+        # briefly so that the response already reflects the final state.
+        if record.reader is not None:
+            record.reader.join(timeout=3.0)
+        with record.lock:
+            if record.state == "cancelling":
+                record.state = "cancelled"
+                record.finished_at = time.time()
+        log.info("run %s cancelled", run_id)
+        return record
+
+    # ------------------------------------------------------------- reading
+    def status(self, record: RunRecord, include_history: bool = True) -> dict[str, Any]:
+        """Serialise a run for ``GET /api/runs/{id}``."""
+        with record.lock:
+            state = record.state
+            result = record.result
+            ticks = list(record.ticks)
+            error = record.error
+        latest = ticks[-1] if ticks else None
+
+        best_cost: Optional[float] = None
+        routes: Optional[list[list[int]]] = None
+        stats: Optional[dict[str, float]] = None
+        n_routes: Optional[int] = None
+        feasible: Optional[bool] = None
+        iterations = 0
+        evaluations = 0
+        seconds = 0.0
+        params: dict[str, Any] = dict(record.params)
+        history: list[dict[str, Any]] = []
+
+        if result is not None:
+            best_cost = result.get("best_cost")
+            routes = result.get("routes")
+            stats = result.get("stats")
+            n_routes = result.get("n_routes")
+            feasible = result.get("feasible")
+            iterations = int(result.get("iterations", 0))
+            evaluations = int(result.get("evaluations", 0))
+            seconds = float(result.get("seconds", 0.0))
+            params = result.get("params") or params
+            history = [
+                {
+                    "iteration": h["iteration"],
+                    "elapsed": h["elapsed"],
+                    "evaluations": h["evaluations"],
+                    "best_cost": h["best_cost"],
+                    "mean_cost": h["mean_cost"],
+                    "diversity": h["diversity"],
+                }
+                for h in result.get("history", [])
+            ]
+        elif latest is not None:
+            best_cost = latest["best_cost"]
+            iterations = latest["iteration"]
+            evaluations = latest["evaluations"]
+            seconds = latest["elapsed"]
+            feasible = latest.get("feasible")
+            # The most recent tick that carried geometry is the best plan the
+            # browser can draw while the search is still going.
+            for tick in reversed(ticks):
+                if tick.get("routes"):
+                    routes = tick["routes"]
+                    break
+            history = [
+                {k: t[k] for k in
+                 ("iteration", "elapsed", "evaluations", "best_cost", "mean_cost", "diversity")}
+                for t in ticks
+            ]
+
+        stored = self.state.get_stored_instance(record.instance_name)
+        coords = None
+        if stored is not None and stored.instance.coords is not None:
+            coords = [[float(a), float(b)] for a, b in stored.instance.coords]
+
+        out: dict[str, Any] = {
+            "run_id": record.run_id,
+            "state": state,
+            "algorithm": record.algorithm,
+            "instance": record.instance_name,
+            "seed": record.seed,
+            "bks": record.bks,
+            "best_cost": best_cost,
+            "n_routes": n_routes,
+            "feasible": feasible,
+            "routes": routes,
+            "stats": stats,
+            "iterations": iterations,
+            "evaluations": evaluations,
+            "seconds": seconds,
+            "params": params,
+            "geojson": self.route_geojson(record, routes),
+            "coords": coords,
+            "error": error,
+            "history": history if include_history else [],
+            "warm_started": record.warm_started,
+            "parent_run_id": record.parent_run_id,
+            "baseline_cost": record.baseline_cost,
+        }
+        return out
+
+    def route_geojson(
+        self, record: RunRecord, routes: Optional[list[list[int]]]
+    ) -> Optional[dict[str, Any]]:
+        """Road-following polylines for a finished run on a road network.
+
+        Returns ``None`` for benchmark instances, which have coordinates but no
+        road graph behind them: drawing a straight line between two CVRPLIB
+        points and calling it a route would be a lie the map tells convincingly.
+        """
+        if not routes or record.network_id is None:
+            return None
+        if record._geojson_built and record.state in ("done", "cancelled", "failed"):
+            return record._geojson
+        stored = self.state.get_stored_instance(record.instance_name)
+        if stored is None or stored.matrices is None or stored.network_id is None:
+            return None
+        try:
+            from qroute.graph.builder import routes_geojson
+
+            bundle = self.state.get_network(stored.network_id)
+            with bundle.lock:
+                geojson = routes_geojson(bundle.network, stored.matrices, routes)
+        except Exception:
+            log.exception("could not build route geometry for run %s", record.run_id)
+            return None
+        if record.state in ("done", "cancelled", "failed"):
+            record._geojson = geojson
+            record._geojson_built = True
+        return geojson
+
+
+# --------------------------------------------------------------------------
+# Warm starting
+# --------------------------------------------------------------------------
+
+
+def canonical_keys(routes: list[list[int]], n_customers: int) -> Optional[np.ndarray]:
+    """Random-key vector encoding a set of routes, for warm-starting a run.
+
+    The key-based solvers decode a vector by sorting it: the customer with the
+    smallest key is visited first. The inverse is therefore to give the customer
+    visited *i*-th the key ``(i + 0.5) / n``, which is exactly the canonical
+    write-back :meth:`qroute.algorithms.decoder.Decoder.tour_to_keys` performs
+    after a local search. Route boundaries are not encoded - the decoder re-splits
+    the giant tour under the capacity constraint - so what is preserved is the
+    visiting order, which is what the search actually explores.
+
+    Returns ``None`` when the routes do not form a permutation of the customers,
+    rather than handing a solver a corrupt starting point.
+    """
+    tour = [int(c) for route in routes for c in route]
+    if len(tour) != n_customers or sorted(tour) != list(range(1, n_customers + 1)):
+        return None
+    keys = np.empty(n_customers, dtype=np.float64)
+    positions = np.arange(n_customers, dtype=np.float64)
+    keys[np.asarray(tour, dtype=np.int64) - 1] = (positions + 0.5) / n_customers
+    return keys
+
+
+def warm_start_matrix(
+    routes: list[list[int]], n_customers: int, rows: int = 4
+) -> Optional[np.ndarray]:
+    """Stack the canonical encoding into the first few population slots.
+
+    Seeding the *whole* population with one point would collapse the search to a
+    local refinement of the previous plan. Seeding a handful of slots keeps the
+    incumbent in the swarm while the remaining particles still start at random,
+    which is the usual compromise for re-optimisation under a changed cost
+    matrix.
+    """
+    keys = canonical_keys(routes, n_customers)
+    if keys is None:
+        return None
+    return np.tile(keys, (max(1, rows), 1))
+
+
+# --------------------------------------------------------------------------
+# Server-Sent Events
+# --------------------------------------------------------------------------
+
+
+async def stream_run(registry: RunRegistry, record: RunRecord, poll: float = 0.05):
+    """Yield SSE messages for one run until it reaches a terminal state.
+
+    Events emitted:
+
+    ``start``    once, carrying the run's identity and its stopping rule
+    ``tick``     one per throttled iteration sample, matching ``RunTick``
+    ``done``     once, carrying the full ``RunStatus``
+    ``error``    instead of ``done`` when the solver failed
+    ``cancelled`` instead of ``done`` when the run was stopped
+
+    A run that has already finished when the client connects still gets its
+    whole history replayed followed by the terminal event, so reconnecting after
+    a dropped connection is not a special case for the frontend.
+    """
+    yield {
+        "event": "start",
+        "data": json.dumps(
+            {
+                "run_id": record.run_id,
+                "algorithm": record.algorithm,
+                "instance": record.instance_name,
+                "seed": record.seed,
+                "max_seconds": record.max_seconds,
+                "max_iterations": record.max_iterations,
+                "bks": record.bks,
+            }
+        ),
+    }
+    index = 0
+    while True:
+        pending = record.ticks_from(index)
+        for tick in pending:
+            payload = {k: v for k, v in tick.items() if k != "type"}
+            yield {"event": "tick", "data": json.dumps(payload)}
+        index += len(pending)
+
+        if record.is_terminal:
+            # One last sweep: the reader thread may have appended between the
+            # snapshot above and the state check.
+            for tick in record.ticks_from(index):
+                yield {"event": "tick", "data": json.dumps({k: v for k, v in tick.items()
+                                                            if k != "type"})}
+            status = registry.status(record)
+            event = {"done": "done", "cancelled": "cancelled", "failed": "error"}[record.state]
+            yield {"event": event, "data": json.dumps(status)}
+            return
+        await asyncio.sleep(poll)
+
+
+def iter_sse_lines(payload: Iterator[dict[str, Any]]) -> Iterator[str]:  # pragma: no cover
+    """Render SSE dictionaries as wire text. Used only by tests and by curl."""
+    for message in payload:
+        yield f"event: {message['event']}\ndata: {message['data']}\n\n"

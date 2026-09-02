@@ -1,122 +1,124 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+/**
+ * Application shell: the top bar, the page switch, and the backend status.
+ *
+ * Routing is a piece of state rather than a router library. There are four
+ * pages, they are always all mounted in the sense that their stores persist,
+ * and the platform is presented rather than deep-linked, so a URL router would
+ * add a dependency and a build step for no benefit. The one thing the shell
+ * insists on is that the backend's reachability is visible at all times: a demo
+ * that silently shows stale numbers when the API has died is worse than one
+ * that says so.
+ */
 
-function App() {
-  const [count, setCount] = useState(0)
+import { useEffect, useState } from 'react';
+import { BenchmarkPage } from './pages/BenchmarkPage';
+import { MapPage } from './pages/MapPage';
+import { MethodPage } from './pages/MethodPage';
+import { SolverPage } from './pages/SolverPage';
+import { useAppStore } from './store/appStore';
+import { useRunStore } from './store/runStore';
+import './styles/global.css';
+
+type PageId = 'map' | 'solver' | 'benchmark' | 'method';
+
+const PAGES: { id: PageId; label: string }[] = [
+  { id: 'map', label: 'Map' },
+  { id: 'solver', label: 'Solver' },
+  { id: 'benchmark', label: 'Benchmark' },
+  { id: 'method', label: 'Method' },
+];
+
+export default function App() {
+  const [page, setPage] = useState<PageId>('map');
+  const backend = useAppStore((s) => s.backend);
+  const health = useAppStore((s) => s.health);
+  const error = useAppStore((s) => s.error);
+  const bootstrap = useAppStore((s) => s.bootstrap);
+  const streaming = useRunStore((s) => s.streaming);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
+  // Retry quietly while the backend is down, so starting the API after the page
+  // is already open recovers without the operator having to reload.
+  useEffect(() => {
+    if (backend !== 'offline') return undefined;
+    const timer = window.setInterval(() => void bootstrap(), 4000);
+    return () => window.clearInterval(timer);
+  }, [backend, bootstrap]);
+
+  const statusTone =
+    backend === 'online' ? 'var(--ok)' : backend === 'offline' ? 'var(--bad)' : 'var(--warn)';
+  const statusLabel =
+    backend === 'online'
+      ? 'backend online'
+      : backend === 'offline'
+        ? 'backend unavailable'
+        : 'connecting…';
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">qroute</span>
+          <span className="brand-sub">
+            Quantum-inspired route optimisation for congested road networks
+          </span>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
+
+        <nav className="nav">
+          {PAGES.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              aria-current={page === p.id ? 'page' : undefined}
+              onClick={() => setPage(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="topbar-right">
+          {streaming && (
+            <span style={{ color: 'var(--accent-text)' }}>solver running</span>
+          )}
+          {health?.version && <span className="mono">v{health.version}</span>}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: statusTone }}>
+            <span className="dot" />
+            {statusLabel}
+          </span>
+          {backend === 'offline' && (
+            <button type="button" className="btn small" onClick={() => void bootstrap()}>
+              Retry
+            </button>
+          )}
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
+      </header>
+
+      {backend === 'offline' && (
+        <div
+          style={{
+            padding: '7px 16px',
+            background: '#2a1c1b',
+            borderBottom: '1px solid #6b3a36',
+            color: '#e0b5ae',
+            fontSize: 12,
+          }}
         >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+          Cannot reach the API{error ? ` — ${error}` : ''}. Start it with{' '}
+          <code>uvicorn qroute.api.app:app --port 8000</code>; this page retries
+          every few seconds.
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      <main className="page">
+        {page === 'map' && <MapPage />}
+        {page === 'solver' && <SolverPage />}
+        {page === 'benchmark' && <BenchmarkPage />}
+        {page === 'method' && <MethodPage />}
+      </main>
+    </div>
+  );
 }
-
-export default App

@@ -210,6 +210,13 @@ def solve_cvrp_cpsat(
         Stop once the relative gap drops below this value. Leave at zero for a
         genuine optimality proof.
     """
+    if instance.max_route_duration is not None:
+        # Silently ignoring a shift limit would return "optimal" routes that no
+        # driver could legally run, so refuse instead.
+        raise NotImplementedError(
+            "solve_cvrp_cpsat does not model max_route_duration; use "
+            "qroute.baselines.ortools_gls, which has a duration dimension"
+        )
     n = instance.size
     cost = instance.cost_matrix
     scaling = integer_scaling(cost, instance.duration if instance.has_time_windows else None)

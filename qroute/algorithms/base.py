@@ -127,6 +127,10 @@ class OptimizationResult:
 ProgressCallback = Callable[[IterationRecord], None]
 
 
+def best_has_routes(solution: Solution) -> bool:
+    return bool(solution.routes)
+
+
 class Optimizer(ABC):
     """Base class for every solver in the platform.
 
@@ -161,6 +165,26 @@ class Optimizer(ABC):
         self._stall = 0
         self._best = Solution()
         iterations = self._run()
+        # Restore feasibility before reporting. The search is allowed to sit
+        # just outside the feasible region because that is where the good moves
+        # are, but a reported solution has to be one an operator could dispatch.
+        dec = getattr(self, "decoder", None)
+        if best_has_routes(self._best) and dec is not None and hasattr(dec, "repair"):
+            stats = self.instance.evaluate(self._best.routes)
+            if stats.total_violation > 1e-9:
+                try:
+                    repaired, _cost = dec.repair(self._best.routes)
+                    candidate = self.instance.make_solution(repaired)
+                    candidate.validate(self.instance.n_customers)
+                    before = stats.total_violation
+                    after = candidate.stats.total_violation
+                    # Accept the repair when it removes violation. A repaired
+                    # solution is usually dearer, and that is the honest trade.
+                    if after < before - 1e-9:
+                        self._best = candidate
+                except Exception:
+                    # A failed repair must never lose the solution we already had.
+                    pass
         elapsed = time.perf_counter() - self._t0
         best = self._best
         if best.routes:

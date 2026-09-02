@@ -58,6 +58,30 @@ upward and the search restarts from the best solution found. Reheating is what
 keeps a single-trajectory search useful under a long budget: without it, once
 ``T`` has decayed the search is a deterministic descent that has already
 finished.
+
+How the defaults were chosen, and what they imply
+-------------------------------------------------
+Measured on A-n80-k10, X-n101-k25 and R101, three seeds each, five-second
+budget (mean gap to best known)::
+
+    2 n moves per level, intensify every level    +3.17%   <- the default
+    2 n moves per level, intensify every 2        +3.47%
+    4 n, intensify every 2, alpha = 0.98          +3.44%
+    4 n, intensify every 2                        +3.66%
+    4 n, intensify every 5                        +4.32%
+    8 n, intensify every 2                        +4.97%
+    8 n, intensify every 5                        +5.55%
+    8 n, intensify every 20 (initial guess)       +6.67%
+
+The trend is monotone and it is worth being honest about what it means: the
+better SA gets, the less of the work the annealing itself is doing. At the
+tuned setting a level is short and local search runs at the end of every level,
+which makes the method close to an annealing-driven iterated local search
+rather than textbook SA. That is what the measurements support, and it is the
+configuration used in the comparison, because a baseline should be reported at
+its best rather than at its most canonical. The textbook setting is one
+argument away (``moves_per_customer=8, intensify_every=0``) for anyone who
+wants to see the difference the intensification makes.
 """
 
 from __future__ import annotations
@@ -77,23 +101,23 @@ class SimulatedAnnealing(Optimizer):
 
     def __init__(self, instance, stop=None, seed=None, callback=None,
                  alpha: float = 0.995,
-                 moves_per_customer: int = 8,
+                 moves_per_customer: int = 2,
                  min_moves_per_level: int = 100,
                  target_acceptance: float = 0.40,
                  calibration_moves: int = 300,
                  min_temperature_fraction: float = 1e-4,
                  reheat_after: int = 25,
                  reheat_fraction: float = 0.5,
-                 intensify_every: int = 20,
+                 intensify_every: int = 1,
                  or_opt_max_segment: int = 3,
                  move_weights: tuple[float, float, float, float] = (0.35, 0.25, 0.20, 0.20),
                  guided_probability: float = 0.5,
                  local_search: bool = True,
                  neighbours: int = 15,
                  local_search_rounds: int = 30,
-                 penalty_capacity: float = 1000.0,
-                 penalty_time_window: float = 1000.0,
-                 penalty_duration: float = 1000.0,
+                 penalty_capacity: float | None = None,
+                 penalty_time_window: float | None = None,
+                 penalty_duration: float | None = None,
                  vehicle_cost: float = 0.0,
                  decoder: Decoder | None = None,
                  **kw):
@@ -170,6 +194,12 @@ class SimulatedAnnealing(Optimizer):
                               self.moves_per_customer * self.n)
         stall_levels = 0
         it = 0
+        # The stopping rules are consulted once per temperature level rather
+        # than once per move. A level is a few hundred to a few thousand moves
+        # of a few microseconds each, so the wall-clock overshoot is small,
+        # whereas calling ``perf_counter`` on every move would be a measurable
+        # share of the run.
+        #
         # The temperature calibration above already spent evaluations, so under
         # a very small evaluation budget ``should_stop`` can already be true
         # here. One level always runs, so a run never returns an empty history.
@@ -192,9 +222,6 @@ class SimulatedAnnealing(Optimizer):
                         best_flat, best_lengths, best_cost = flat.copy(), lengths.copy(), cost
                         self.offer(self._solution(flat, lengths, cost))
                         level_improved = True
-                # The clock is checked once per level rather than per move; a
-                # level is short enough that the overshoot is negligible and
-                # calling perf_counter tens of thousands of times is not.
 
             # --- periodic intensification -----------------------------------
             if self.intensify_every and it % self.intensify_every == 0:
@@ -218,6 +245,10 @@ class SimulatedAnnealing(Optimizer):
                 flat, lengths, cost = best_flat.copy(), best_lengths.copy(), best_cost
                 stall_levels = 0
 
+            # The history's ``diversity`` slot carries SA's acceptance rate.
+            # It plays the same diagnostic role as swarm diversity - it says
+            # whether the search is still moving or has frozen - but the two
+            # are different quantities and must not be plotted on one axis.
             self.record(it, float(best_cost), float(cost),
                         float(accepted / max(moves_per_level, 1)), True)
         return it

@@ -168,6 +168,33 @@ def _symmetrised(c: np.ndarray) -> np.ndarray:
     return np.minimum(c, c.T)
 
 
+def _mst(w: np.ndarray) -> tuple[float, object]:
+    """Minimum spanning tree of the dense symmetric matrix ``w``.
+
+    Returns its total weight under the *original* weights and the sparse tree
+    itself, which the 1-tree bound needs in order to read off node degrees.
+
+    SciPy's sparse MST treats a zero entry as "no edge", and the 1-tree bound
+    feeds it weights shifted by node potentials that can be negative. Every
+    weight is therefore translated so the smallest becomes 1, the tree is built,
+    and the ``k - 1`` units of translation are subtracted again -- a spanning
+    tree of a ``k``-node graph always has exactly ``k - 1`` edges, so the
+    correction is exact and the choice of tree is unaffected.
+    """
+    from scipy.sparse.csgraph import minimum_spanning_tree
+
+    k = w.shape[0]
+    if k < 2:
+        return 0.0, None
+    off = w.copy()
+    np.fill_diagonal(off, np.inf)
+    offset = 1.0 - float(off.min())
+    shifted = w + offset
+    np.fill_diagonal(shifted, 0.0)
+    tree = minimum_spanning_tree(shifted)
+    return float(tree.sum()) - (k - 1) * offset, tree
+
+
 def mst_bound(instance: Instance, vehicles_lb: int | None = None) -> float:
     """Minimum-spanning-tree bound.
 
@@ -184,20 +211,13 @@ def mst_bound(instance: Instance, vehicles_lb: int | None = None) -> float:
     invalid, because a two-customer-free route ``depot -> i -> depot`` uses the
     same undirected edge twice.
     """
-    from scipy.sparse.csgraph import minimum_spanning_tree
-
     c = _symmetrised(instance.cost_matrix)
     n = c.shape[0]
     if n < 2:
         return 0.0
     k = vehicles_lb if vehicles_lb is not None else bin_packing_bound(instance.demand, instance.capacity)
 
-    # A zero weight would be dropped by the sparse MST routine, so shift the
-    # weights up by one, build the tree, then subtract the n - 1 units back.
-    shifted = c + 1.0
-    np.fill_diagonal(shifted, 0.0)
-    tree = minimum_spanning_tree(shifted)
-    mst_weight = float(tree.sum()) - (n - 1)
+    mst_weight, _tree = _mst(c)
 
     off = c.copy()
     np.fill_diagonal(off, np.inf)
@@ -222,8 +242,6 @@ def one_tree_bound(cost: np.ndarray, iterations: int = 200, step: float = 2.0) -
     This is a TSP bound. It is *not* valid for the CVRP, where the solution is
     not a single tour -- use :func:`mst_bound` there.
     """
-    from scipy.sparse.csgraph import minimum_spanning_tree
-
     c = _symmetrised(np.asarray(cost, dtype=np.float64))
     n = c.shape[0]
     if n < 3:
@@ -239,10 +257,7 @@ def one_tree_bound(cost: np.ndarray, iterations: int = 200, step: float = 2.0) -
 
     for it in range(iterations):
         w = c + pi[:, None] + pi[None, :]
-        sub = w[1:, 1:] + 1.0
-        np.fill_diagonal(sub, 0.0)
-        tree = minimum_spanning_tree(sub)
-        tree_weight = float(tree.sum()) - (n - 2)
+        tree_weight, tree = _mst(np.ascontiguousarray(w[1:, 1:]))
 
         deg = np.zeros(n, dtype=np.float64)
         rows, cols = tree.nonzero()

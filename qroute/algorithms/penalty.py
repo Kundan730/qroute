@@ -50,7 +50,7 @@ values onto the decoder itself; :meth:`apply_to` does that in one call.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
@@ -165,17 +165,21 @@ class AdaptivePenalty:
         One unit of overload should cost about as much as a long arc, otherwise
         the weight is meaningless: on an instance whose arcs cost ~1000 a
         penalty of 1.0 is no penalty at all, and on one whose arcs cost ~0.01 a
-        penalty of 1000 is pure rejection. ``max(arc cost) / max(demand)`` gives
-        the exchange rate between the two units, so overloading a vehicle by its
-        largest single customer costs roughly the longest arc in the instance.
+        penalty of 1000 is pure rejection. The exchange rate between the two
+        units is what fixes this, and it is a property of the instance.
+
+        The exact rule is delegated to
+        :meth:`~qroute.algorithms.decoder.Decoder.default_capacity_penalty`
+        rather than duplicated, so the starting point of the adaptive scheme and
+        the fixed weight a decoder uses when no controller is attached can never
+        drift apart. The import is deferred because it pulls in the compiled
+        kernels, and this module is otherwise cheap to import.
         """
         if instance is None:
             return 1.0
-        max_cost = float(np.max(instance.cost_matrix))
-        max_demand = float(np.max(instance.demand))
-        if max_demand <= 0.0 or not np.isfinite(max_cost):
-            return 1.0
-        return float(np.clip(max_cost / max_demand, 0.1, 1000.0))
+        from qroute.algorithms.decoder import Decoder
+
+        return Decoder.default_capacity_penalty(instance)
 
     def _clamp(self, value: float) -> float:
         return float(min(max(float(value), self.floor), self.ceiling))

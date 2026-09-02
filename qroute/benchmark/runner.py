@@ -165,6 +165,42 @@ def _run_one(task: dict) -> dict:
         }
 
 
+#: Solvers whose result does not depend on a random seed. Running them once per
+#: seed would produce identical rows and would overstate how much evidence the
+#: benchmark contains, so the report labels them and the runner says so.
+DETERMINISTIC = {"ortools", "ortools_gls", "cpsat", "exact", "milp", "heldkarp"}
+
+
+def _call_with_supported(fn, inst, **kwargs):
+    """Call ``fn`` passing only the keyword arguments it actually accepts.
+
+    The external wrappers have deliberately different signatures - OR-Tools takes
+    no seed because its search is deterministic, CP-SAT takes a worker count
+    instead - so the dispatcher adapts rather than forcing a uniform signature
+    that would be a lie about what each solver does.
+    """
+    import inspect
+
+    sig = inspect.signature(fn)
+    accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD
+                         for p in sig.parameters.values())
+    if accepts_kwargs:
+        # The wrapper forwards **kwargs to an inner function; inspect that one.
+        inner = getattr(fn, "__wrapped__", None)
+        target = inner or fn
+        try:
+            allowed = set(inspect.signature(target).parameters)
+        except (TypeError, ValueError):
+            allowed = set(kwargs)
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD
+               for p in inspect.signature(target).parameters.values()):
+            allowed |= set(kwargs)
+    else:
+        allowed = set(sig.parameters)
+    filtered = {k: v for k, v in kwargs.items() if k in allowed}
+    return fn(inst, **filtered)
+
+
 def _dispatch(algo: str, inst, stop, seed: int, params: dict):
     """Map an algorithm name to a call that returns an OptimizationResult."""
     algo = algo.lower()
@@ -172,13 +208,14 @@ def _dispatch(algo: str, inst, stop, seed: int, params: dict):
     # because they own their own search loop.
     if algo in ("ortools", "ortools_gls"):
         from qroute.baselines.ortools_gls import solve_ortools
-        return solve_ortools(inst, seconds=stop.max_seconds, seed=seed, **params)
+        return _call_with_supported(solve_ortools, inst, seconds=stop.max_seconds, **params)
     if algo in ("pyvrp", "hgs"):
         from qroute.baselines.pyvrp_hgs import solve_pyvrp
-        return solve_pyvrp(inst, seconds=stop.max_seconds, seed=seed, **params)
+        return _call_with_supported(solve_pyvrp, inst, seconds=stop.max_seconds,
+                                    seed=seed, **params)
     if algo in ("cpsat", "exact"):
         from qroute.exact.cpsat import solve_cpsat
-        return solve_cpsat(inst, seconds=stop.max_seconds, **params)
+        return _call_with_supported(solve_cpsat, inst, seconds=stop.max_seconds, **params)
     if algo in ("random", "restart"):
         from qroute.benchmark.reference import RandomRestart
         return RandomRestart(inst, stop, seed, **params).solve()

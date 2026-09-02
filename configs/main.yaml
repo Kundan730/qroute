@@ -1,0 +1,31 @@
+name: main
+instances:
+  # Tier 0 - small enough for an exact solver to close, so "near-optimal" is verifiable
+  - P-n16-k8
+  - P-n23-k8
+  - A-n32-k5
+  - A-n33-k5
+  - A-n37-k5
+  - A-n39-k5
+  # Tier 1 - medium, proven-optimal best-known values
+  - A-n45-k7
+  - A-n54-k7
+  - A-n65-k9
+  - A-n80-k10
+  - B-n50-k7
+  - B-n78-k10
+  - P-n76-k4
+  - P-n101-k4
+  # Tier 2 - large scale
+  - X-n101-k25
+  - X-n153-k22
+  - X-n200-k36
+algorithms: [qpso, pso, ga, sa, aco, random, ortools, pyvrp]
+seeds: 10
+master_seed: 20260920
+max_seconds: 20.0
+max_iterations: 1000000
+workers: 9
+save_history: true
+history_stride: 5
+output_dir: results/runs

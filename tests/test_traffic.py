@@ -608,6 +608,33 @@ class TestSimulator:
         sim.apply_to(net)
         np.testing.assert_array_equal(net.received, sim.edge_travel_times())
 
+    def test_absolute_capacity_cancels_out_of_the_travel_time(self):
+        """Documented consequence of the saturation-first demand model.
+
+        Only *relative* capacity changes (incidents) move the answer, so the
+        choice of capacity table cannot silently shift the calibration.
+        """
+        g = make_toy_graph()
+        a = TrafficSimulator(g, seed=4).set_clock(19.0)
+        b = TrafficSimulator(
+            make_toy_graph(), seed=4, capacity=np.full(6, 9999.0)
+        ).set_clock(19.0)
+        np.testing.assert_allclose(a.edge_travel_times(), b.edge_travel_times())
+        assert a.capacity_source == "traffic.bpr" and b.capacity_source == "explicit"
+
+    def test_network_capacity_is_preferred_over_the_local_table(self):
+        class ArrayNetwork:
+            free_flow_time = np.array([10.0, 20.0])
+            edge_class = ["primary", "residential"]
+            edge_lanes = [2, 1]
+            length = np.array([100.0, 200.0])
+            edge_keys = [(1, 2, 0), (2, 3, 0)]
+            edge_capacity = np.array([4321.0, 123.0])
+
+        sim = TrafficSimulator(ArrayNetwork(), seed=1)
+        assert sim.capacity_source == "network"
+        np.testing.assert_array_equal(sim.base_capacity, ArrayNetwork.edge_capacity)
+
     def test_accepts_an_array_style_road_network(self):
         class ArrayNetwork:
             free_flow_time = np.array([10.0, 20.0, 30.0])

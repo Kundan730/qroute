@@ -339,10 +339,11 @@ def held_karp_cvrp(
     route depends only on its customer *set*, which stops being true once
     waiting times and window feasibility enter.
     """
-    if instance.has_time_windows:
+    if instance.has_time_windows or instance.max_route_duration is not None:
         raise NotImplementedError(
             "the subset DP assumes route cost depends only on the customer set, "
-            "which fails with time windows; use qroute.exact.cpsat instead"
+            "which fails with time windows, and it does not track route duration; "
+            "use qroute.exact.cpsat or qroute.baselines.ortools_gls instead"
         )
     m = instance.n_customers
     if m > max_customers:

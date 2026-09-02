@@ -1,0 +1,37 @@
+# Tier 2: the large X instances, 100 to 1000 customers. These are where the
+# question stops being "can it find the optimum" and becomes "does it still
+# scale", which is the question the problem statement actually asks about a
+# city-sized network.
+#
+# The budget is 120 s per run because a 1000-customer instance needs time even
+# to build a first feasible solution, and the history stride is 5 to keep
+# rows.jsonl to a sensible size.
+#
+# 8 instances x 4 algorithms x 5 seeds = 160 runs of 120 s, roughly 40 minutes
+# of wall clock on 8 workers. Expect it to need several gigabytes of memory:
+# X-n1001-k43 holds a 1001 x 1001 matrix per worker process.
+
+name: tier2
+instances:
+  - X-n101-k25
+  - X-n110-k13
+  - X-n153-k22
+  - X-n200-k36
+  - X-n251-k28
+  - X-n401-k29
+  - X-n502-k39
+  - X-n1001-k43
+algorithms:
+  - qpso
+  - ga
+  - sa
+  - ortools
+seeds: 5
+master_seed: 20260920
+max_seconds: 120
+max_iterations: 1000000
+workers: 0
+params: {}
+output_dir: results/runs
+save_history: true
+history_stride: 5

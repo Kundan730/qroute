@@ -178,11 +178,15 @@ def solve_pyvrp_result(
     fleet = max(1, min(fleet, instance.n_customers))
 
     has_tw = instance.has_time_windows
-    if has_tw:
-        tw_i = scaling.to_int(instance.time_windows)
-        service_i = scaling.to_int(
-            instance.service_time if instance.service_time is not None else np.zeros(n)
-        )
+    # A shift limit becomes PyVRP's per-vehicle shift_duration. Routes then have
+    # to carry a duration, so both the duration matrix and the service times
+    # matter even on an instance with no time windows.
+    has_duration_limit = instance.max_route_duration is not None
+    timed = has_tw or has_duration_limit
+    tw_i = scaling.to_int(instance.time_windows) if has_tw else None
+    service_i = scaling.to_int(
+        instance.service_time if instance.service_time is not None else np.zeros(n)
+    )
     coords = instance.coords if instance.coords is not None else np.zeros((n, 2))
 
     model = Model()
@@ -199,10 +203,15 @@ def solve_pyvrp_result(
         model.add_client(
             location=locations[i],
             delivery=[int(demand[i])],
-            service_duration=int(service_i[i]) if has_tw else 0,
+            service_duration=int(service_i[i]) if timed else 0,
             tw_early=int(tw_i[i, 0]) if has_tw else 0,
             tw_late=int(tw_i[i, 1]) if has_tw else 2**40,
         )
+    shift = (
+        int(round(instance.max_route_duration * scaling.factor))
+        if has_duration_limit
+        else 2**40
+    )
     model.add_vehicle_type(
         num_available=fleet,
         capacity=[capacity],
@@ -210,6 +219,7 @@ def solve_pyvrp_result(
         end_depot=depot,
         tw_early=int(tw_i[0, 0]) if has_tw else 0,
         tw_late=int(tw_i[0, 1]) if has_tw else 2**40,
+        shift_duration=shift,
         max_distance=2**40,
     )
 
@@ -217,8 +227,12 @@ def solve_pyvrp_result(
         for j in range(n):
             if i == j:
                 continue
-            model.add_edge(locations[i], locations[j], distance=int(cost_i[i, j]),
-                           duration=int(dur_i[i, j]) if has_tw else 0)
+            model.add_edge(
+                locations[i],
+                locations[j],
+                distance=int(cost_i[i, j]),
+                duration=int(dur_i[i, j]) if timed else 0,
+            )
 
     stop = MaxIterations(int(max_iterations)) if max_iterations is not None else MaxRuntime(float(seconds))
 
