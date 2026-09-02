@@ -10,31 +10,49 @@ All experiments use a matched evaluation budget: every variant decodes and
 evaluates the same number of candidate solutions, so the only difference is
 which candidates get evaluated.
 
+**A correction, recorded rather than quietly folded in.** The first version of
+this document reported an ablation that was confounded. QPSO hard-coded a
+constraint penalty of 1000 while every other solver, and the multi-start
+control, inherited the instance-scaled default of about 16. The algorithms were
+not minimising the same objective, so the comparison was not a comparison. An
+adversarial verification pass found it; the tests did not. Everything below is
+the re-run with identical objectives.
+
 ---
 
-## 1. The split and the local search do most of the work
+## 1. What each component contributes
 
-Six instances, five seeds, 1,200 evaluations each.
+Six instances, five seeds, 3,000 evaluations each, every solver minimising the
+identical objective.
 
 | Configuration | Mean gap to best known |
 | --- | --- |
-| Random orderings, no local search | 150.3% |
-| Random orderings, with local search | 1.4% |
-| QPSO, no local search | 1.8% |
-| QPSO, with local search | 1.8% |
+| Random orderings, no local search | 146.6% |
+| QPSO, no local search | 1.25% |
+| Random orderings, with local search | 1.07% |
+| Genetic algorithm | 0.56% |
+| Ant colony optimisation | 0.75% |
+| Classical particle swarm | 1.13% |
+| QPSO, with local search | 1.34% |
+| Simulated annealing | 2.53% |
 
-Two readings, and both are true.
+Three things follow, and the second is not flattering.
 
-The encouraging one: the quantum-inspired swarm is a genuinely effective
-optimiser in its own right. Given the same optimal split and the same number of
-evaluations, random sampling of orderings lands 150% above the best-known cost
-while QPSO lands 1.8% above it. The search rule is doing real work.
+**The pipeline is what delivers the result.** Random orderings without local
+search sit 147% above the best-known cost. Everything that reaches roughly one
+percent does so because of the optimal split and the local search, not because
+of any particular search rule.
 
-The uncomfortable one: adding local search to random sampling achieves the same
-thing, and the two do not compose. QPSO with local search is no better than
-random restarts with local search.
+**QPSO does not beat the classical baselines.** It places sixth of eight. The
+genetic algorithm is more than twice as good on average, and ant colony
+optimisation is close behind it. This holds on five of the six instances.
 
----
+**The quantum-inspired rule is nevertheless a real optimiser.** With no local
+search at all, QPSO reaches 1.25% where random sampling of the same number of
+orderings reaches 146.6%. The update rule is doing genuine work; what it does
+not do is add to a strong local search. Notably, QPSO without local search
+(1.25%) is slightly *better* than QPSO with it (1.34%), which is the clue that
+led to the mechanism in section 3.
 
 ## 2. Multi-start local search is not beaten by the swarm
 
