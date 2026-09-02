@@ -1,0 +1,1834 @@
+{
+ "cvrp": {
+  "A-n32-k5": {
+   "dimension": 32,
+   "capacity": 100,
+   "bks": 784.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n32-k5.vrp"
+  },
+  "A-n33-k5": {
+   "dimension": 33,
+   "capacity": 100,
+   "bks": 661.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n33-k5.vrp"
+  },
+  "A-n33-k6": {
+   "dimension": 33,
+   "capacity": 100,
+   "bks": 742.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n33-k6.vrp"
+  },
+  "A-n34-k5": {
+   "dimension": 34,
+   "capacity": 100,
+   "bks": 778.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n34-k5.vrp"
+  },
+  "A-n36-k5": {
+   "dimension": 36,
+   "capacity": 100,
+   "bks": 799.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n36-k5.vrp"
+  },
+  "A-n37-k5": {
+   "dimension": 37,
+   "capacity": 100,
+   "bks": 669.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n37-k5.vrp"
+  },
+  "A-n37-k6": {
+   "dimension": 37,
+   "capacity": 100,
+   "bks": 949.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n37-k6.vrp"
+  },
+  "A-n38-k5": {
+   "dimension": 38,
+   "capacity": 100,
+   "bks": 730.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n38-k5.vrp"
+  },
+  "A-n39-k5": {
+   "dimension": 39,
+   "capacity": 100,
+   "bks": 822.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n39-k5.vrp"
+  },
+  "A-n39-k6": {
+   "dimension": 39,
+   "capacity": 100,
+   "bks": 831.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n39-k6.vrp"
+  },
+  "A-n44-k6": {
+   "dimension": 44,
+   "capacity": 100,
+   "bks": 937.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n44-k6.vrp"
+  },
+  "A-n45-k6": {
+   "dimension": 45,
+   "capacity": 100,
+   "bks": 944.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n45-k6.vrp"
+  },
+  "A-n45-k7": {
+   "dimension": 45,
+   "capacity": 100,
+   "bks": 1146.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n45-k7.vrp"
+  },
+  "A-n46-k7": {
+   "dimension": 46,
+   "capacity": 100,
+   "bks": 914.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n46-k7.vrp"
+  },
+  "A-n48-k7": {
+   "dimension": 48,
+   "capacity": 100,
+   "bks": 1073.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n48-k7.vrp"
+  },
+  "A-n53-k7": {
+   "dimension": 53,
+   "capacity": 100,
+   "bks": 1010.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n53-k7.vrp"
+  },
+  "A-n54-k7": {
+   "dimension": 54,
+   "capacity": 100,
+   "bks": 1167.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n54-k7.vrp"
+  },
+  "A-n55-k9": {
+   "dimension": 55,
+   "capacity": 100,
+   "bks": 1073.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n55-k9.vrp"
+  },
+  "A-n60-k9": {
+   "dimension": 60,
+   "capacity": 100,
+   "bks": 1354.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n60-k9.vrp"
+  },
+  "A-n61-k9": {
+   "dimension": 61,
+   "capacity": 100,
+   "bks": 1034.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n61-k9.vrp"
+  },
+  "A-n62-k8": {
+   "dimension": 62,
+   "capacity": 100,
+   "bks": 1288.0,
+   "routes": 8,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n62-k8.vrp"
+  },
+  "A-n63-k10": {
+   "dimension": 63,
+   "capacity": 100,
+   "bks": 1314.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n63-k10.vrp"
+  },
+  "A-n63-k9": {
+   "dimension": 63,
+   "capacity": 100,
+   "bks": 1616.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n63-k9.vrp"
+  },
+  "A-n64-k9": {
+   "dimension": 64,
+   "capacity": 100,
+   "bks": 1401.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n64-k9.vrp"
+  },
+  "A-n65-k9": {
+   "dimension": 65,
+   "capacity": 100,
+   "bks": 1174.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n65-k9.vrp"
+  },
+  "A-n69-k9": {
+   "dimension": 69,
+   "capacity": 100,
+   "bks": 1159.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n69-k9.vrp"
+  },
+  "A-n80-k10": {
+   "dimension": 80,
+   "capacity": 100,
+   "bks": 1763.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/A-n80-k10.vrp"
+  },
+  "B-n31-k5": {
+   "dimension": 31,
+   "capacity": 100,
+   "bks": 672.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n31-k5.vrp"
+  },
+  "B-n34-k5": {
+   "dimension": 34,
+   "capacity": 100,
+   "bks": 788.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n34-k5.vrp"
+  },
+  "B-n35-k5": {
+   "dimension": 35,
+   "capacity": 100,
+   "bks": 955.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n35-k5.vrp"
+  },
+  "B-n38-k6": {
+   "dimension": 38,
+   "capacity": 100,
+   "bks": 805.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n38-k6.vrp"
+  },
+  "B-n39-k5": {
+   "dimension": 39,
+   "capacity": 100,
+   "bks": 549.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n39-k5.vrp"
+  },
+  "B-n41-k6": {
+   "dimension": 41,
+   "capacity": 100,
+   "bks": 829.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n41-k6.vrp"
+  },
+  "B-n43-k6": {
+   "dimension": 43,
+   "capacity": 100,
+   "bks": 742.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n43-k6.vrp"
+  },
+  "B-n44-k7": {
+   "dimension": 44,
+   "capacity": 100,
+   "bks": 909.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n44-k7.vrp"
+  },
+  "B-n45-k5": {
+   "dimension": 45,
+   "capacity": 100,
+   "bks": 751.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n45-k5.vrp"
+  },
+  "B-n45-k6": {
+   "dimension": 45,
+   "capacity": 100,
+   "bks": 678.0,
+   "routes": 6,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n45-k6.vrp"
+  },
+  "B-n50-k7": {
+   "dimension": 50,
+   "capacity": 100,
+   "bks": 741.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n50-k7.vrp"
+  },
+  "B-n50-k8": {
+   "dimension": 50,
+   "capacity": 100,
+   "bks": 1312.0,
+   "routes": 8,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n50-k8.vrp"
+  },
+  "B-n51-k7": {
+   "dimension": 51,
+   "capacity": 100,
+   "bks": 1032.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n51-k7.vrp"
+  },
+  "B-n52-k7": {
+   "dimension": 52,
+   "capacity": 100,
+   "bks": 747.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n52-k7.vrp"
+  },
+  "B-n56-k7": {
+   "dimension": 56,
+   "capacity": 100,
+   "bks": 707.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n56-k7.vrp"
+  },
+  "B-n57-k7": {
+   "dimension": 57,
+   "capacity": 100,
+   "bks": 1153.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n57-k7.vrp"
+  },
+  "B-n57-k9": {
+   "dimension": 57,
+   "capacity": 100,
+   "bks": 1598.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n57-k9.vrp"
+  },
+  "B-n63-k10": {
+   "dimension": 63,
+   "capacity": 100,
+   "bks": 1496.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n63-k10.vrp"
+  },
+  "B-n64-k9": {
+   "dimension": 64,
+   "capacity": 100,
+   "bks": 861.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n64-k9.vrp"
+  },
+  "B-n66-k9": {
+   "dimension": 66,
+   "capacity": 100,
+   "bks": 1316.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n66-k9.vrp"
+  },
+  "B-n67-k10": {
+   "dimension": 67,
+   "capacity": 100,
+   "bks": 1032.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n67-k10.vrp"
+  },
+  "B-n68-k9": {
+   "dimension": 68,
+   "capacity": 100,
+   "bks": 1272.0,
+   "routes": 9,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n68-k9.vrp"
+  },
+  "B-n78-k10": {
+   "dimension": 78,
+   "capacity": 100,
+   "bks": 1221.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/B-n78-k10.vrp"
+  },
+  "P-n101-k4": {
+   "dimension": 101,
+   "capacity": 400,
+   "bks": 681.0,
+   "routes": 4,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n101-k4.vrp"
+  },
+  "P-n16-k8": {
+   "dimension": 16,
+   "capacity": 35,
+   "bks": 450.0,
+   "routes": 8,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n16-k8.vrp"
+  },
+  "P-n19-k2": {
+   "dimension": 19,
+   "capacity": 160,
+   "bks": 212.0,
+   "routes": 2,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n19-k2.vrp"
+  },
+  "P-n20-k2": {
+   "dimension": 20,
+   "capacity": 160,
+   "bks": 216.0,
+   "routes": 2,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n20-k2.vrp"
+  },
+  "P-n21-k2": {
+   "dimension": 21,
+   "capacity": 160,
+   "bks": 211.0,
+   "routes": 2,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n21-k2.vrp"
+  },
+  "P-n22-k2": {
+   "dimension": 22,
+   "capacity": 160,
+   "bks": 216.0,
+   "routes": 2,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n22-k2.vrp"
+  },
+  "P-n22-k8": {
+   "dimension": 22,
+   "capacity": 3000,
+   "bks": 603.0,
+   "routes": 8,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n22-k8.vrp"
+  },
+  "P-n23-k8": {
+   "dimension": 23,
+   "capacity": 40,
+   "bks": 529.0,
+   "routes": 8,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n23-k8.vrp"
+  },
+  "P-n40-k5": {
+   "dimension": 40,
+   "capacity": 140,
+   "bks": 458.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n40-k5.vrp"
+  },
+  "P-n45-k5": {
+   "dimension": 45,
+   "capacity": 150,
+   "bks": 510.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n45-k5.vrp"
+  },
+  "P-n50-k10": {
+   "dimension": 50,
+   "capacity": 100,
+   "bks": 696.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n50-k10.vrp"
+  },
+  "P-n50-k7": {
+   "dimension": 50,
+   "capacity": 150,
+   "bks": 554.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n50-k7.vrp"
+  },
+  "P-n50-k8": {
+   "dimension": 50,
+   "capacity": 120,
+   "bks": 631.0,
+   "routes": 8,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n50-k8.vrp"
+  },
+  "P-n51-k10": {
+   "dimension": 51,
+   "capacity": 80,
+   "bks": 741.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n51-k10.vrp"
+  },
+  "P-n55-k10": {
+   "dimension": 55,
+   "capacity": 115,
+   "bks": 694.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n55-k10.vrp"
+  },
+  "P-n55-k15": {
+   "dimension": 55,
+   "capacity": 70,
+   "bks": 989.0,
+   "routes": 15,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n55-k15.vrp"
+  },
+  "P-n55-k7": {
+   "dimension": 55,
+   "capacity": 170,
+   "bks": 568.0,
+   "routes": 7,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n55-k7.vrp"
+  },
+  "P-n55-k8": {
+   "dimension": 55,
+   "capacity": 160,
+   "bks": 588.0,
+   "routes": 8,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n55-k8.vrp"
+  },
+  "P-n60-k10": {
+   "dimension": 60,
+   "capacity": 120,
+   "bks": 744.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n60-k10.vrp"
+  },
+  "P-n60-k15": {
+   "dimension": 60,
+   "capacity": 80,
+   "bks": 968.0,
+   "routes": 15,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n60-k15.vrp"
+  },
+  "P-n65-k10": {
+   "dimension": 65,
+   "capacity": 130,
+   "bks": 792.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n65-k10.vrp"
+  },
+  "P-n70-k10": {
+   "dimension": 70,
+   "capacity": 135,
+   "bks": 827.0,
+   "routes": 10,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n70-k10.vrp"
+  },
+  "P-n76-k4": {
+   "dimension": 76,
+   "capacity": 350,
+   "bks": 593.0,
+   "routes": 4,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n76-k4.vrp"
+  },
+  "P-n76-k5": {
+   "dimension": 76,
+   "capacity": 280,
+   "bks": 627.0,
+   "routes": 5,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/P-n76-k5.vrp"
+  },
+  "X-n1001-k43": {
+   "dimension": 1001,
+   "capacity": 131,
+   "bks": 72355.0,
+   "routes": 43,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n1001-k43.vrp"
+  },
+  "X-n101-k25": {
+   "dimension": 101,
+   "capacity": 206,
+   "bks": 27591.0,
+   "routes": 26,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n101-k25.vrp"
+  },
+  "X-n110-k13": {
+   "dimension": 110,
+   "capacity": 66,
+   "bks": 14971.0,
+   "routes": 13,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n110-k13.vrp"
+  },
+  "X-n153-k22": {
+   "dimension": 153,
+   "capacity": 144,
+   "bks": 21220.0,
+   "routes": 23,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n153-k22.vrp"
+  },
+  "X-n200-k36": {
+   "dimension": 200,
+   "capacity": 402,
+   "bks": 58578.0,
+   "routes": 36,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n200-k36.vrp"
+  },
+  "X-n251-k28": {
+   "dimension": 251,
+   "capacity": 69,
+   "bks": 38684.0,
+   "routes": 28,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n251-k28.vrp"
+  },
+  "X-n401-k29": {
+   "dimension": 401,
+   "capacity": 745,
+   "bks": 66154.0,
+   "routes": 29,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n401-k29.vrp"
+  },
+  "X-n502-k39": {
+   "dimension": 502,
+   "capacity": 13,
+   "bks": 69226.0,
+   "routes": 39,
+   "ewt": "EUC_2D",
+   "has_coord": true,
+   "has_matrix": true,
+   "file": "data/benchmarks/cvrplib/X-n502-k39.vrp"
+  }
+ },
+ "vrptw": {
+  "C101": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 827.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C101.txt"
+  },
+  "C102": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 827.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C102.txt"
+  },
+  "C103": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 826.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C103.txt"
+  },
+  "C104": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 822.9,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C104.txt"
+  },
+  "C105": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 827.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C105.txt"
+  },
+  "C106": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 827.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C106.txt"
+  },
+  "C107": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 827.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C107.txt"
+  },
+  "C108": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 827.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C108.txt"
+  },
+  "C109": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 827.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C109.txt"
+  },
+  "C201": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 589.1,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C201.txt"
+  },
+  "C202": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 589.1,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C202.txt"
+  },
+  "C203": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 588.7,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C203.txt"
+  },
+  "C204": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 588.1,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C204.txt"
+  },
+  "C205": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 586.4,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C205.txt"
+  },
+  "C206": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 586.0,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C206.txt"
+  },
+  "C207": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 585.8,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C207.txt"
+  },
+  "C208": {
+   "dimension": 101,
+   "capacity": 700,
+   "vehicles": 25,
+   "bks": 585.8,
+   "routes": 3,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/C208.txt"
+  },
+  "R101": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1637.7,
+   "routes": 20,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R101.txt"
+  },
+  "R102": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1466.6,
+   "routes": 18,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R102.txt"
+  },
+  "R103": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1208.7,
+   "routes": 14,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R103.txt"
+  },
+  "R104": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 971.5,
+   "routes": 11,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R104.txt"
+  },
+  "R105": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1355.3,
+   "routes": 15,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R105.txt"
+  },
+  "R106": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1234.6,
+   "routes": 13,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R106.txt"
+  },
+  "R107": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1064.6,
+   "routes": 11,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R107.txt"
+  },
+  "R108": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 932.1,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R108.txt"
+  },
+  "R109": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1146.9,
+   "routes": 13,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R109.txt"
+  },
+  "R110": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1068.0,
+   "routes": 12,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R110.txt"
+  },
+  "R111": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1048.7,
+   "routes": 12,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R111.txt"
+  },
+  "R112": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 948.6,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R112.txt"
+  },
+  "R201": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 1143.2,
+   "routes": 8,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R201.txt"
+  },
+  "R202": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 1029.6,
+   "routes": 8,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R202.txt"
+  },
+  "R203": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 870.8,
+   "routes": 6,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R203.txt"
+  },
+  "R204": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 731.3,
+   "routes": 5,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R204.txt"
+  },
+  "R205": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 949.8,
+   "routes": 5,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R205.txt"
+  },
+  "R206": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 875.9,
+   "routes": 5,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R206.txt"
+  },
+  "R207": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 794.0,
+   "routes": 4,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R207.txt"
+  },
+  "R208": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 701.0,
+   "routes": 4,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R208.txt"
+  },
+  "R209": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 854.8,
+   "routes": 5,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R209.txt"
+  },
+  "R210": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 900.5,
+   "routes": 6,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R210.txt"
+  },
+  "R211": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 746.7,
+   "routes": 4,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/R211.txt"
+  },
+  "RC101": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1619.8,
+   "routes": 15,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC101.txt"
+  },
+  "RC102": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1457.4,
+   "routes": 14,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC102.txt"
+  },
+  "RC103": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1258.0,
+   "routes": 11,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC103.txt"
+  },
+  "RC104": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1132.3,
+   "routes": 10,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC104.txt"
+  },
+  "RC105": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1513.7,
+   "routes": 15,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC105.txt"
+  },
+  "RC106": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1372.7,
+   "routes": 12,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC106.txt"
+  },
+  "RC107": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1207.8,
+   "routes": 12,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC107.txt"
+  },
+  "RC108": {
+   "dimension": 101,
+   "capacity": 200,
+   "vehicles": 25,
+   "bks": 1114.2,
+   "routes": 11,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC108.txt"
+  },
+  "RC201": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 1261.8,
+   "routes": 9,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC201.txt"
+  },
+  "RC202": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 1092.3,
+   "routes": 8,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC202.txt"
+  },
+  "RC203": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 923.7,
+   "routes": 5,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC203.txt"
+  },
+  "RC204": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 783.5,
+   "routes": 4,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC204.txt"
+  },
+  "RC205": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 1154.0,
+   "routes": 7,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC205.txt"
+  },
+  "RC206": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 1051.1,
+   "routes": 7,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC206.txt"
+  },
+  "RC207": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 962.9,
+   "routes": 6,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC207.txt"
+  },
+  "RC208": {
+   "dimension": 101,
+   "capacity": 1000,
+   "vehicles": 25,
+   "bks": 776.1,
+   "routes": 4,
+   "keys": [
+    "capacity",
+    "demand",
+    "edge_weight",
+    "name",
+    "node_coord",
+    "service_time",
+    "time_window",
+    "vehicles"
+   ],
+   "file": "data/benchmarks/solomon/RC208.txt"
+  }
+ }
+}

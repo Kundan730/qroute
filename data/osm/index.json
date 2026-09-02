@@ -1,0 +1,20 @@
+{
+ "bengaluru_koramangala": {
+  "nodes": 13404,
+  "edges": 34353,
+  "sec": 19.1,
+  "mb": 16.6
+ },
+ "delhi_connaught": {
+  "nodes": 7445,
+  "edges": 18500,
+  "sec": 11.4,
+  "mb": 9.4
+ },
+ "chennai_annanagar": {
+  "nodes": 13132,
+  "edges": 33483,
+  "sec": 15.1,
+  "mb": 16.3
+ }
+}
