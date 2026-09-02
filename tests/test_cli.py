@@ -182,6 +182,23 @@ def test_compare_reports_every_algorithm_and_a_test(tmp_path: Path):
         assert entry["cost_best"] <= entry["cost_mean"] + 1e-9
 
 
+def test_compare_warns_when_the_seed_count_cannot_reach_significance():
+    """A test that cannot reject must not be read as evidence of equivalence.
+
+    The exact two-sided signed-rank test on n pairs has a smallest attainable
+    p-value of 2^(1-n), so at five seeds nothing can come out below 0.05.
+    """
+    few = invoke("compare", "P-n16-k8", "--algorithms", "qpso,sa", "--seeds", "5",
+                 "--seconds", "1")
+    assert few.exit_code == 0, few.output
+    assert "cannot return a p-value below 0.0625" in " ".join(few.output.split())
+
+    many = invoke("compare", "P-n16-k8", "--algorithms", "qpso,sa", "--seeds", "6",
+                  "--seconds", "1")
+    assert many.exit_code == 0, many.output
+    assert "cannot return a p-value" not in " ".join(many.output.split())
+
+
 # ---------------------------------------------------------------------------
 # exact
 # ---------------------------------------------------------------------------

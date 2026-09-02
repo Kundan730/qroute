@@ -33,10 +33,9 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 import networkx as nx
-import numpy as np
 import osmnx as ox
 
 DATA_ROOT = Path(os.environ.get("QROUTE_DATA", "data"))

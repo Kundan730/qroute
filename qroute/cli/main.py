@@ -403,6 +403,18 @@ def compare(
     con.print(render.compare_table(entries, inst.name, bks, control))
     con.print(f"[dim]{seconds:g} s per run, seeds derived from master seed {master_seed}; "
               f"lower is better.[/dim]")
+    # The exact two-sided signed-rank test on n pairs cannot report a p-value
+    # below 2^(1-n), whatever the data: with five seeds the floor is 0.0625, so
+    # every comparison is doomed to read "no significant difference" and a
+    # reader could mistake that for evidence of equivalence. Say plainly that
+    # the test had no power rather than letting the column imply a finding.
+    if len(names) > 1 and seeds >= 1:
+        floor = 2.0 ** (1 - seeds)
+        if floor > 0.05:
+            con.print(f"[yellow]With {seeds} seeds the signed-rank test cannot return a p-value "
+                      f"below {floor:.4g}, so no comparison here can reach significance at the "
+                      f"0.05 level. Use --seeds 6 or more, or read the full `qroute bench` "
+                      f"sweep, before concluding that two algorithms are equivalent.[/yellow]")
     if json_out is not None:
         _write_json(json_out, {
             "instance": inst.name, "bks": bks, "seconds": seconds,

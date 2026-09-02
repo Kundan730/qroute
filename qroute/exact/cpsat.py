@@ -54,7 +54,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from typing import Sequence
 
 import numpy as np
 from ortools.sat.python import cp_model

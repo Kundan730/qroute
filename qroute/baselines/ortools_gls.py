@@ -40,10 +40,8 @@ include this baseline on the same axes as the metaheuristics.
 
 from __future__ import annotations
 
-import math
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2

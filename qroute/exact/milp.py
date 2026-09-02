@@ -63,10 +63,9 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Iterable
 
-import numpy as np
 from ortools.linear_solver import pywraplp
 
 from qroute.algorithms.base import OptimizationResult

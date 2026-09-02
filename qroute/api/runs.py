@@ -750,31 +750,32 @@ class RunRegistry:
                 )
             self._runs[record.run_id] = record
 
-        progress_queue = self._queue()
-        payload = {
-            "instance": instance,
-            "algorithm": algorithm,
-            "params": dict(params or {}),
-            "seed": int(seed),
-            "max_seconds": float(max_seconds),
-            "max_iterations": int(max_iterations),
-            "initial_keys": None if initial_keys is None else np.asarray(initial_keys),
-        }
-        process = self._context.Process(
-            target=solver_worker,
-            args=(payload, progress_queue),
-            name=f"qroute-run-{record.run_id}",
-            daemon=True,
-        )
-        record.process = process
-        record.state = "running"
-        record.started_at = time.time()
+        # Everything from here to the reader thread runs with the slot already
+        # claimed, so any failure has to settle the record into a terminal state
+        # or that slot would be consumed for the life of the process.
         try:
+            progress_queue = self._queue()
+            payload = {
+                "instance": instance,
+                "algorithm": algorithm,
+                "params": dict(params or {}),
+                "seed": int(seed),
+                "max_seconds": float(max_seconds),
+                "max_iterations": int(max_iterations),
+                "initial_keys": None if initial_keys is None else np.asarray(initial_keys),
+            }
+            process = self._context.Process(
+                target=solver_worker,
+                args=(payload, progress_queue),
+                name=f"qroute-run-{record.run_id}",
+                daemon=True,
+            )
+            record.process = process
+            record.state = "running"
+            record.started_at = time.time()
             with _neutral_main_module():
                 process.start()
         except Exception as exc:  # pragma: no cover - only if the OS refuses a fork
-            # The slot was claimed above, so it has to be given back here or a
-            # launcher failure would permanently consume one of the four.
             with record.lock:
                 record.state = "failed"
                 record.error = f"could not start the solver process: {type(exc).__name__}: {exc}"

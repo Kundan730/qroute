@@ -25,7 +25,6 @@ We therefore always rebuild the matrix from the coordinates ourselves.
 
 from __future__ import annotations
 
-import math
 import os
 from pathlib import Path
 from typing import Optional
