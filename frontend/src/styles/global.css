@@ -522,8 +522,13 @@ td.num {
   font-family: var(--font);
 }
 
+/*
+ * Standard OpenStreetMap tiles are a light, saturated basemap. Desaturating and
+ * darkening them here turns them into the quiet backdrop the coloured road
+ * layer needs, without depending on a keyed dark-tile provider.
+ */
 .leaflet-tile-pane {
-  filter: grayscale(1) brightness(0.55) contrast(1.05);
+  filter: grayscale(1) invert(1) brightness(0.42) contrast(1.15);
 }
 
 .leaflet-control-zoom a {

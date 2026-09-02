@@ -797,6 +797,8 @@ def osm_demo(
                              help="Budget for the re-optimisation; half the first by default.")] = None,
     incident_minutes: Annotated[float, typer.Option("--incident-minutes",
                                 help="How long the incident lasts.")] = 45.0,
+    incident_edges: Annotated[int, typer.Option("--incident-edges",
+                              help="How many of the plan's busiest arcs the incident hits.")] = 40,
     json_out: Annotated[Optional[Path], typer.Option("--json", help="Write the whole story here.")] = None,
 ) -> None:
     """Plan under morning traffic, break a road, and re-optimise from a warm start.
@@ -809,6 +811,8 @@ def osm_demo(
     not the much larger and much less honest "cost after the incident against
     cost before it".
     """
+    from collections import Counter
+
     import numpy as np
 
     from qroute.graph.builder import build_instance, build_matrices, leg_node_paths
@@ -850,36 +854,38 @@ def osm_demo(
     # Break a road the plan actually uses: an incident somewhere the vehicles
     # never go would change nothing and would prove nothing.
     paths = leg_node_paths(network, matrices, plan.best.routes)
-    longest = max(paths, key=len) if paths else []
     src, dst = network.edge_endpoints()
     edge_of = {(int(u), int(v)): i for i, (u, v) in enumerate(zip(src, dst))}
-    span = 8                                  # edges either side of the midpoint
-    mid = len(longest) // 2
-    corridor_nodes = [int(x) for x in longest[max(mid - span, 0):mid + span + 1]]
-    blocked: list[int] = []
-    for a, b in zip(corridor_nodes, corridor_nodes[1:]):
-        idx = edge_of.get((a, b))
-        if idx is not None:
-            blocked.append(idx)
-    if not blocked:
-        raise _fail("could not map the planned route back onto network edges",
-                    "this indicates a mismatch between the matrix and the graph")
+    usage: Counter[int] = Counter()
+    for path in paths:
+        for a, b in zip(path, path[1:]):
+            idx = edge_of.get((int(a), int(b)))
+            if idx is not None:
+                usage[idx] += 1
+    if not usage:
+        raise _fail("could not map the planned routes back onto network edges",
+                    "this indicates a mismatch between the travel-time matrix and the graph")
+    # Hit the links the fleet leans on hardest rather than a random street: the
+    # busiest arcs of the plan are where an incident actually costs something,
+    # and an incident that costs nothing would demonstrate nothing.
+    blocked = [idx for idx, _count in usage.most_common(incident_edges)]
 
     # A severe slowdown rather than a hard closure. The road network stores one
     # finite travel time per edge, so an impassable arc has no representation
     # there; a factor-of-ten slowdown is the strongest disruption the weight
-    # model can carry honestly, and it is more than enough to make the planned
-    # corridor the wrong way to go.
+    # model can carry honestly, and it is more than enough to make the affected
+    # corridors the wrong way to go.
     start = float(before_state["time_minutes"])
     sim.add_event(slowdown(blocked, start_minute=start, duration_minutes=incident_minutes,
                            speed_multiplier=0.1,
-                           description="incident on a corridor the plan uses"))
-    # Links leaving the affected nodes carry the traffic that diverts around the
-    # incident, so they slow down too. Without this the re-plan would be a
-    # trivial detour onto an unaffected parallel street.
-    corridor_set = set(corridor_nodes)
-    neighbours = [i for i, (u, v) in enumerate(zip(src, dst))
-                  if int(u) in corridor_set and i not in set(blocked)][:60]
+                           description="incident on the corridors the plan uses most"))
+    # Links leaving the affected junctions carry the traffic that diverts around
+    # the incident, so they slow down too. Without this the re-plan would be a
+    # trivial hop onto an untouched parallel street.
+    affected_nodes = {int(src[i]) for i in blocked} | {int(dst[i]) for i in blocked}
+    blocked_set = set(blocked)
+    neighbours = [i for i, u in enumerate(src)
+                  if int(u) in affected_nodes and i not in blocked_set][:120]
     if neighbours:
         sim.add_event(slowdown(neighbours, start_minute=start,
                                duration_minutes=incident_minutes, speed_multiplier=0.6,
@@ -888,8 +894,8 @@ def osm_demo(
     sim.apply_to(network)
     after_state = sim.state()
     mean_after, _ = _congestion_summary(after_state)
-    con.print(f"\n[bold]2. incident[/bold] {len(blocked)} edges on the planned corridor cut to "
-              f"a tenth of their speed and {len(neighbours)} adjacent edges slowed, "
+    con.print(f"\n[bold]2. incident[/bold] the {len(blocked)} arcs the plan uses most are cut to "
+              f"a tenth of their speed and {len(neighbours)} adjacent arcs are slowed, "
               f"for {incident_minutes:g} minutes")
     con.print(f"   mean congestion level {mean_before:.3f} -> {mean_after:.3f}; "
               f"network travel time "
@@ -949,10 +955,22 @@ def osm_demo(
               f"{render.format_duration_hms(saved)} of driving "
               f"({100.0 * saved / old_plan_after.cost:.1f}% of the disrupted plan) in "
               f"{reopt:g} s of computation.")
+    con.print("[dim]Two different adaptations are at work and the table separates them. "
+              "Recomputing the travel-time matrix reroutes every leg around the incident by "
+              "itself, which is why the original plan still runs at "
+              f"{100.0 * (old_plan_after.cost - base) / base:+.1f}% rather than being stranded; "
+              "re-optimising then changes which vehicle serves which stop and in what order, "
+              f"and that is the further {100.0 * saved / old_plan_after.cost:.1f}%.[/dim]")
+    margin = cold.best.cost - replan.best.cost
+    if abs(margin) < 1e-6:
+        verdict = "reaches the same cost as"
+    elif margin > 0:
+        verdict = f"beats a cold restart by {margin:,.0f} s"
+    else:
+        verdict = f"is beaten by a cold restart by {-margin:,.0f} s"
     con.print(f"[dim]{changed} of {plan.best.n_routes} routes differ from the original plan; "
-              f"the warm start is "
-              f"{'better than' if replan.best.cost < cold.best.cost else 'no better than'} "
-              f"a cold restart on the same budget.[/dim]")
+              f"on the same budget the warm start {verdict}"
+              f"{' a cold restart' if abs(margin) < 1e-6 else ''}.[/dim]")
 
     if json_out is not None:
         _write_json(json_out, {

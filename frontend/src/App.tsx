@@ -108,7 +108,7 @@ export default function App() {
           }}
         >
           Cannot reach the API{error ? ` — ${error}` : ''}. Start it with{' '}
-          <code>uvicorn qroute.api.app:app --port 8000</code>; this page retries
+          <code>python -m qroute.api.app</code>; this page retries
           every few seconds.
         </div>
       )}

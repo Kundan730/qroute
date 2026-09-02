@@ -19,6 +19,7 @@ import { boundsOf, buildRouteLines } from '../components/map/geometry';
 import type { LatLng } from '../components/map/geometry';
 import {
   EdgeLayer,
+  ExactRouteLayer,
   FitBounds,
   RouteLayer,
   StopsLayer,
@@ -26,7 +27,7 @@ import {
 } from '../components/map/layers';
 import { Badge, CheckLine, Field, KeyValue, Notice, RailSection, Stat, StatGrid } from '../components/ui';
 import { congestionBand } from '../lib/colors';
-import { dayName, fmt, fmtClock, fmtDistance, fmtInt, fmtSeconds } from '../lib/format';
+import { dayName, fmt, fmtClock, fmtDistance, fmtDuration, fmtInt, fmtSeconds } from '../lib/format';
 import { useAppStore } from '../store/appStore';
 import { DETAIL_LEVELS, useMapStore } from '../store/mapStore';
 import { useRunStore } from '../store/runStore';
@@ -76,18 +77,34 @@ export function MapPage() {
   );
 
   const stopBounds = useMemo(() => (coords ? boundsOf(coords) : null), [coords]);
-  const networkBounds = useMemo<[LatLng, LatLng] | null>(
-    () =>
-      network
-        ? [
-            [network.bbox[0], network.bbox[1]],
-            [network.bbox[2], network.bbox[3]],
-          ]
-        : null,
-    [network],
-  );
 
-  const center: LatLng = network?.center ?? [12.9345, 77.6183];
+  // A network the backend is still loading reports a zero centre and an empty
+  // bounding box, so the view is derived from the drawn edges whenever the
+  // summary's box is degenerate. That also keeps the map correct if the
+  // catalogue was fetched before the graph finished loading.
+  const networkBounds = useMemo<[LatLng, LatLng] | null>(() => {
+    const box = network?.bbox;
+    if (box && (box[0] !== box[2] || box[1] !== box[3])) {
+      return [
+        [box[0], box[1]],
+        [box[2], box[3]],
+      ];
+    }
+    const features = map.edges?.features ?? [];
+    if (features.length === 0) return null;
+    const points: LatLng[] = [];
+    for (const feature of features) {
+      const line = feature.geometry.coordinates;
+      points.push([line[0][1], line[0][0]]);
+      points.push([line[line.length - 1][1], line[line.length - 1][0]]);
+    }
+    return boundsOf(points);
+  }, [network, map.edges]);
+
+  const center: LatLng =
+    network && (network.center[0] !== 0 || network.center[1] !== 0)
+      ? network.center
+      : [12.9335, 77.6193];
   const traffic = map.traffic;
   const ratio = traffic?.travel_time_seconds.network_ratio ?? 1;
   const straightLine = lines.length > 0 && lines.every((l) => !l.onRoad);
@@ -114,7 +131,7 @@ export function MapPage() {
           <strong>Backend unavailable.</strong> The map draws a live road network,
           a live traffic simulation and live solver output; none of that can be
           shown without the API. Start it with{' '}
-          <code>uvicorn qroute.api.app:app --port 8000</code> and reload.
+          <code>python -m qroute.api.app</code> and reload.
         </Notice>
       </div>
     );
@@ -341,9 +358,17 @@ export function MapPage() {
           style={{ height: '100%', width: '100%' }}
           zoomControl
         >
+          {/*
+            Standard OpenStreetMap tiles, desaturated and darkened by the
+            `.leaflet-tile-pane` filter in the stylesheet. A key-free source is
+            deliberate: the demonstration must not fail because a tile provider
+            wants an API key, and if the tiles do not load at all the road
+            network still draws, because the roads are the data and the basemap
+            is only context.
+          */}
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
-            attribution='Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, tiles &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             maxZoom={19}
           />
           <EdgeLayer
@@ -355,6 +380,7 @@ export function MapPage() {
           <RouteLayer lines={lines} dim={run.streaming} />
           <StopsLayer instance={map.instance} />
           <VehicleLayer lines={lines} running={map.animate && !run.streaming} />
+          <ExactRouteLayer route={map.exactRoute} />
           <FitBounds bounds={stopBounds ?? networkBounds} />
         </MapContainer>
         <Legend
@@ -471,7 +497,9 @@ export function MapPage() {
           )}
         </RailSection>
 
-        {run.status && (
+        {/* A failed or cancelled run has no solution to describe; showing an
+            empty card with a feasibility badge would imply otherwise. */}
+        {run.status && run.status.best_cost !== null && (
           <RailSection title="Current solution">
             <StatGrid columns={2}>
               <Stat
@@ -496,6 +524,73 @@ export function MapPage() {
               </Badge>{' '}
               <Badge>{fmtInt(run.status.iterations)} iterations</Badge>{' '}
               <Badge>{fmtSeconds(run.status.seconds)}</Badge>
+            </div>
+          </RailSection>
+        )}
+
+        {map.instance?.node_ids && (
+          <RailSection title="Exact shortest path">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Field label="From">
+                <select
+                  value={map.exactFrom}
+                  onChange={(e) => map.setExactPair(Number(e.target.value), map.exactTo)}
+                >
+                  {map.instance.coords.map((_, i) => (
+                    <option key={i} value={i}>
+                      {i === 0 ? 'Depot' : `Customer ${i}`}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="To">
+                <select
+                  value={map.exactTo}
+                  onChange={(e) => map.setExactPair(map.exactFrom, Number(e.target.value))}
+                >
+                  {map.instance.coords.map((_, i) => (
+                    <option key={i} value={i}>
+                      {i === 0 ? 'Depot' : `Customer ${i}`}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn"
+                disabled={map.exactLoading || map.exactFrom === map.exactTo}
+                onClick={() => void map.computeExactRoute()}
+              >
+                {map.exactLoading ? 'Searching…' : 'Compute'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={!map.exactRoute}
+                onClick={map.clearExactRoute}
+              >
+                Clear
+              </button>
+            </div>
+            {map.exactRoute && (
+              <div style={{ marginTop: 8 }}>
+                <KeyValue label="Length" value={fmtDistance(map.exactRoute.distance_m)} />
+                <KeyValue label="Travel time" value={fmtDuration(map.exactRoute.travel_time_s)} />
+                <KeyValue label="At free flow" value={fmtDuration(map.exactRoute.free_flow_s)} />
+                <KeyValue label="Delay ratio" value={`${fmt(map.exactRoute.delay_ratio, 2)} x`} />
+                <KeyValue label="Nodes expanded" value={fmtInt(map.exactRoute.nodes_expanded)} />
+                <KeyValue
+                  label="Search time"
+                  value={`${fmt(map.exactRoute.search_seconds * 1000, 1)} ms`}
+                />
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 8, lineHeight: 1.45 }}>
+              A* with a great-circle lower bound. The bound never over-estimates
+              the remaining cost, so this path is exactly optimal, not an
+              approximation.
             </div>
           </RailSection>
         )}

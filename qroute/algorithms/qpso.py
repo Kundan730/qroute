@@ -151,13 +151,26 @@ class QPSO(Optimizer):
 
     # ------------------------------------------------------------------ beta
     def beta(self, iteration: int) -> float:
-        """Contraction-expansion coefficient at ``iteration``.
+        """Contraction-expansion coefficient at the current point in the run.
 
-        Kept below the stability bound of ~1.78 established by Sun et al.'s
+        Kept below the stability bound of about 1.78 established by Sun et al.'s
         convergence analysis, so the swarm is guaranteed to contract.
+
+        The schedule is indexed on *whichever budget is actually binding*. This
+        matters more than it sounds: benchmark runs are given a wall-clock
+        budget with the iteration cap left effectively infinite, and a schedule
+        that divided by that cap would compute a progress fraction near zero for
+        the whole run, hold beta at its starting value, and never contract at
+        all. The exploration-to-exploitation transition would silently not
+        happen, which is precisely the behaviour the algorithm is supposed to
+        provide.
         """
-        total = max(self.stop.max_iterations, 1)
-        frac = min(iteration / total, 1.0)
+        frac = 0.0
+        if np.isfinite(self.stop.max_seconds) and self.stop.max_seconds > 0:
+            frac = self.elapsed / self.stop.max_seconds
+        if self.stop.max_iterations and self.stop.max_iterations < 10 ** 6:
+            frac = max(frac, iteration / max(self.stop.max_iterations, 1))
+        frac = min(max(frac, 0.0), 1.0)
         if self.beta_schedule == "linear":
             return self.beta_start + (self.beta_end - self.beta_start) * frac
         if self.beta_schedule == "exponential":

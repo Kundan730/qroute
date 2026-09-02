@@ -17,14 +17,16 @@ survive the trip.
 How progress gets back
 ----------------------
 Every optimiser accepts ``callback=fn(IterationRecord)``. The worker installs a
-callback that pushes a small dictionary onto a :class:`multiprocessing.Manager`
-queue. A manager queue is used rather than a plain ``multiprocessing.Queue``
-because the queue then lives in the manager process, so terminating a cancelled
-worker cannot leave a half-written record in a shared buffer.
+callback that pushes a small dictionary onto a ``multiprocessing.Queue`` created
+from the spawn context, one queue per run. On the server side one daemon thread
+per run drains that queue into the run record. Endpoints and the SSE generator
+only ever read the record, so they never block on the queue.
 
-On the server side one daemon thread per run drains that queue into the run
-record. Endpoints and the SSE generator only ever read the record, so they never
-block on the queue.
+A ``Manager().Queue()`` would be the textbook choice here, and was the first
+implementation, but it does not survive every way this server is started: the
+manager child re-imports the parent's main module, which fails under
+``python -m uvicorn``. See :meth:`RunRegistry._queue` for the measurement and for
+how the robustness a manager would have given is recovered without one.
 
 Throttling
 ----------
@@ -435,22 +437,30 @@ class RunRegistry:
         self.max_active = max_active
         self._runs: "dict[str, RunRecord]" = {}
         self._lock = threading.Lock()
-        self._manager: Optional[Any] = None
         self._context = mp.get_context("spawn")
 
     # -------------------------------------------------------------- plumbing
     def _queue(self):
-        """One manager for the process, created on first use.
+        """A fresh progress queue for one run.
 
-        Starting a manager forks a helper process, which costs about fifty
-        milliseconds. Doing it at import time would slow every ``qroute``
-        command that merely imports the API; doing it per run would show up in
-        the latency of ``POST /api/runs``.
+        A plain spawn-context queue rather than a ``Manager().Queue()``. The
+        manager was the first choice, because a queue that lives in a third
+        process cannot be left half-written by terminating a cancelled worker.
+        It turned out not to survive every way the server is launched: starting
+        a manager re-imports the parent's ``__main__`` module in the manager
+        process, which under ``python -m uvicorn`` (and under any launcher whose
+        main module has side effects) fails with an ``EOFError`` in the parent as
+        the manager child dies during bootstrap. A plain queue needs no helper
+        process and works identically under ``uvicorn``, ``python -m``, pytest
+        and an embedded ``TestClient``.
+
+        The robustness that the manager would have bought is recovered by
+        construction instead: each run gets its own queue, so a queue left
+        inconsistent by a terminated worker is discarded with that run and can
+        never affect another, and the reader loop polls with a timeout and
+        watches the child's liveness rather than blocking forever on a ``get``.
         """
-        with self._lock:
-            if self._manager is None:
-                self._manager = self._context.Manager()
-        return self._manager.Queue()
+        return self._context.Queue()
 
     def active_count(self) -> int:
         with self._lock:
@@ -468,14 +478,6 @@ class RunRegistry:
         """Terminate every live worker; called from the application's lifespan."""
         for record in self.all_runs():
             self.cancel(record.run_id)
-        with self._lock:
-            manager = self._manager
-            self._manager = None
-        if manager is not None:
-            try:
-                manager.shutdown()
-            except Exception:  # pragma: no cover
-                pass
 
     # --------------------------------------------------------------- start
     def start(

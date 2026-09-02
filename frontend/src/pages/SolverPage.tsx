@@ -91,7 +91,7 @@ export function SolverPage() {
         <Notice kind="error">
           <strong>Backend unavailable.</strong> Solver runs execute in the Python
           process; there is nothing meaningful to show without it. Start it with{' '}
-          <code>uvicorn qroute.api.app:app --port 8000</code> and reload.
+          <code>python -m qroute.api.app</code> and reload.
         </Notice>
       </div>
     );

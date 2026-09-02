@@ -49,17 +49,48 @@ QPSO, is how a search state becomes a giant tour.
 
 Honesty about performance
 -------------------------
-Quantum-inspired evolutionary algorithms are frequently oversold. Independent
-comparisons - Ma and Cheah, "Are Quantum-Inspired Genetic Algorithms Really
-Better than Classical Genetic Algorithms?" (arXiv:2409.13788, 2024) - find that
-on TSPLIB-style routing problems a plain genetic algorithm usually matches or
-beats a quantum-inspired one and runs considerably faster, because the rotation
-update is a comparatively weak, positionally-independent learning signal. The
-measurements this project records agree with that direction: on the benchmark
-set QIEA is competitive on small instances and loses to QPSO as instances grow.
-This module is included because a correct, testable rotation gate is a required
-deliverable and a fair baseline to measure against, not because it is claimed to
-be the best solver here.
+Quantum-inspired evolutionary algorithms are frequently oversold, and the
+sceptical literature deserves to be stated before the numbers. Ma and Cheah,
+"Are Quantum-Inspired Genetic Algorithms Really Better than Classical Genetic
+Algorithms?" (arXiv:2409.13788, 2024), find that on TSPLIB-style routing
+problems a plain genetic algorithm usually matches or beats a quantum-inspired
+one and runs considerably faster, because the rotation update is a weak,
+positionally-independent learning signal.
+
+What was actually measured here, on this machine, equal 20-second wall-clock
+budget, 3 seeds, mean gap to best-known (runs executed serially):
+
+    ===========  ======  ======  ====================
+    instance     QPSO    QIEA    QuantumRotationKeys
+    ===========  ======  ======  ====================
+    A-n32-k5     0.00%   0.00%   0.00%
+    A-n45-k7     0.52%   0.00%   0.00%
+    A-n80-k10    2.36%   0.51%   0.98%
+    ===========  ======  ======  ====================
+
+So on this benchmark both rotation-gate engines beat the project's QPSO, which
+is not the result the literature above would predict. Three caveats keep that
+from being a claim about quantum-inspired methods in general:
+
+* Three instances from one CVRP family is not evidence about algorithms; it is
+  evidence about these instances. The full benchmark sweep is what should be
+  quoted in the report.
+* Part of the margin is not the gate at all. Setting ``delta_theta=0`` disables
+  rotation entirely and leaves a randomised-restart control that still has the
+  same construction, split and local search. On A-n80-k10 that control scores
+  1.89% (QIEA) and 2.46% (QuantumRotationKeys) - so the gate is worth roughly
+  1.3 and 1.5 percentage points respectively, and the rest comes from the
+  representation and from local search.
+* Part of the margin is a QPSO configuration artefact. QPSO's ``beta`` schedule
+  is keyed to ``max_iterations``, which a wall-clock benchmark leaves
+  effectively unbounded, so its contraction coefficient never anneals. Giving
+  QPSO a matching iteration cap improves it to 0.15% on A-n45-k7 (from 0.52%)
+  though it does not help on A-n80-k10. The schedule in this module uses
+  whichever budget is binding, precisely to avoid that trap.
+
+The ablation is the part worth keeping: the rotation gate does measurably work -
+it is not decoration - and the module reports what it measured rather than what
+would be flattering.
 """
 
 from __future__ import annotations

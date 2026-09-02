@@ -13,7 +13,7 @@
 import L from 'leaflet';
 import { useEffect, useMemo, useRef } from 'react';
 import { useMap } from 'react-leaflet';
-import type { EdgeCollection, EdgeProperties, InstanceDetail } from '../../api/types';
+import type { EdgeCollection, EdgeProperties, ExactRoute, InstanceDetail } from '../../api/types';
 import { congestionColor, edgeWeight, vehicleColor } from '../../lib/colors';
 import { fmt, fmtDistance, fmtDuration } from '../../lib/format';
 import type { LatLng, RouteLine } from './geometry';
@@ -238,5 +238,45 @@ export function FitBounds({ bounds }: { bounds: [LatLng, LatLng] | null }) {
     if (!bounds) return;
     map.fitBounds(bounds, { padding: [40, 40], animate: true });
   }, [bounds, map]);
+  return null;
+}
+
+// ------------------------------------------------------------- exact path
+
+/**
+ * The exact shortest path between two stops, drawn as a bright thin line over
+ * everything else.
+ *
+ * It is deliberately visually distinct from the vehicle routes: this is the
+ * output of A* on the road graph, an exactly optimal answer to a polynomial
+ * subproblem, and it should not be mistaken for the metaheuristic's output.
+ */
+export function ExactRouteLayer({ route }: { route: ExactRoute | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!route || route.points.length < 2) return undefined;
+    const group = L.layerGroup();
+    group.addLayer(
+      L.polyline(route.points, { color: '#0b0e12', weight: 7, opacity: 0.7, interactive: false }),
+    );
+    const path = L.polyline(route.points, {
+      color: '#f2f6fb',
+      weight: 2.5,
+      opacity: 0.95,
+      dashArray: '9 5',
+    });
+    path.bindTooltip(
+      `Exact shortest path · ${fmtDistance(route.distance_m)} · ${fmtDuration(route.travel_time_s)} ` +
+        `(${fmt(route.delay_ratio, 2)} x free flow) · ${route.nodes_expanded} nodes expanded`,
+      { sticky: true, direction: 'top' },
+    );
+    group.addLayer(path);
+    group.addTo(map);
+    return () => {
+      group.remove();
+    };
+  }, [route, map]);
+
   return null;
 }

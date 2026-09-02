@@ -128,7 +128,7 @@ export function BenchmarkPage() {
         <Notice kind="error">
           <strong>Backend unavailable.</strong> Benchmark results are read from
           the run directories on disk by the API. Start it with{' '}
-          <code>uvicorn qroute.api.app:app --port 8000</code> and reload.
+          <code>python -m qroute.api.app</code> and reload.
         </Notice>
       </div>
     );

@@ -33,7 +33,8 @@ export function Legend({
         border: '1px solid var(--border-strong)',
         borderRadius: 'var(--radius-lg)',
         padding: '9px 11px',
-        minWidth: 214,
+        minWidth: 236,
+        maxWidth: 292,
         backdropFilter: 'blur(3px)',
       }}
     >
@@ -134,8 +135,9 @@ export function Legend({
           lineHeight: 1.45,
         }}
       >
-        Counts are road segments per band. Line width follows the OSM highway
-        class.
+        Counts are road segments per band across the whole network, from the
+        backend's own histogram; the map draws the most important few thousand.
+        Line width follows the OSM highway class.
       </div>
     </div>
   );
