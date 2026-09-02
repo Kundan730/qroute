@@ -226,6 +226,60 @@ method description.
 The default is therefore the fixed constant. The derived law remains available
 as an option, documented as unsupported.
 
+## 6. The definitive benchmark
+
+Seventeen instances, nine solvers, ten seeds each, an equal twenty-second
+wall-clock budget, every run pinned to one thread. 1,520 completed runs. No run
+returned an infeasible solution. OR-Tools failed to produce any solution on
+X-n153-k22 in all ten seeds, which is reported as "no solution found" rather
+than folded into an average.
+
+Friedman mean ranks over the sixteen instances every solver scored, lower being
+better, omnibus p = 1.25e-09:
+
+| Rank | Solver | Mean rank | Mean gap |
+| ---: | :--- | ---: | ---: |
+| 1 | PyVRP, hybrid genetic search | 3.53 | 0.24% |
+| 2 | Genetic algorithm | 3.66 | 0.66% |
+| 3 | **Quantum rotation-gate engine (QIEA)** | 4.12 | 0.65% |
+| 4 | Ant colony optimisation | 4.19 | 0.77% |
+| 5 | **Quantum particle swarm (QPSO)** | 4.66 | 0.85% |
+| 6 | Simulated annealing | 5.47 | 0.93% |
+| 7 | Classical particle swarm | 5.69 | 0.99% |
+| 8 | Random multi-start | 6.19 | 1.21% |
+| 9 | OR-Tools guided local search | 7.50 | — |
+
+QPSO against every other solver, paired by instance and seed, 170 pairs each,
+Holm-corrected:
+
+| Comparison | Result |
+| --- | --- |
+| QPSO vs classical PSO | **QPSO better**, p = 1.4e-05, effect 0.57 |
+| QPSO vs simulated annealing | **QPSO better**, p = 0.0016, effect 0.43 |
+| QPSO vs random multi-start | **QPSO better**, p = 1.7e-08, effect 0.72 |
+| QPSO vs OR-Tools | **QPSO better**, p = 8.7e-18, effect 0.96 |
+| QPSO vs ant colony | ACO better, p = 0.0027, effect 0.40 |
+| QPSO vs quantum rotation gate | QIEA better, p = 5.8e-06, effect 0.68 |
+| QPSO vs genetic algorithm | GA better, p = 5.8e-06, effect 0.69 |
+| QPSO vs PyVRP | PyVRP better, p = 1.3e-11, effect 0.96 |
+
+The comparison the problem statement actually asks for is the first one, and it
+comes out positive: the quantum-behaved swarm significantly outperforms the
+classical particle swarm it is derived from, under an identical decoder, an
+identical local search and an identical budget. It also beats simulated
+annealing and the multi-start control.
+
+It does not beat the genetic algorithm or ant colony optimisation, and it is
+well behind PyVRP, which is a specialised state-of-the-art solver for this exact
+problem. Both quantum-inspired engines nevertheless place above every classical
+swarm and single-trajectory method tested.
+
+Eight of the seventeen instances are solved to the best-known value by nearly
+every solver, which is why the small tier is retained: it disqualifies anything
+that fails there rather than distinguishing the rest.
+
+---
+
 ## 6. What this means for the claims made
 
 Supported by measurement:
@@ -240,19 +294,22 @@ Supported by measurement:
 * The classical contraction range is wrong for a random-key encoding, and
   correcting it is a significant improvement, confirmed twice at p = 0.00013
   over 80 and 88 paired runs.
+* QPSO significantly outperforms classical PSO, simulated annealing and
+  multi-start local search on the full benchmark, at p = 1.4e-05 or better.
 
 Not supported, and therefore not claimed:
 
 * That QPSO beats every classical metaheuristic. It does not: the genetic
-  algorithm and ant colony optimisation are both better on these instances.
-* That the corrected version beats multi-start local search. It ties with it.
+  algorithm and ant colony optimisation are both significantly better.
+* That it approaches the state of the art. PyVRP is far ahead, at 0.24 percent
+  against 0.85, and the report says so on every table.
 * That the correct coefficient scales with instance size. That was predicted
   and tested, and the prediction failed.
 * Any claim of quantum advantage, or of quantum hardware being involved.
 
 ---
 
-## 7. What would be needed to go further
+## 8. What would be needed to go further
 
 The remaining gap to the genetic algorithm is most likely the absence of
 diversity-aware survivor selection, where an individual's fitness combines its
