@@ -94,15 +94,44 @@ $$
 
 with weights $w_T, w_D, w_C, w_K \ge 0$ exposed in the user interface.
 
-The congestion term $\gamma_{ij}$ is defined as **delay above free flow**:
+### 3.1 What "congestion" means, precisely
 
-$$\gamma_{ij} = t_{ij} - t^0_{ij} \quad \text{(seconds)}$$
+The word names two different quantities in this system, and both are useful, so
+they are defined here and each is used consistently in its own place.
 
-This definition is chosen deliberately. Measuring congestion as a *ratio* would make
-a two-second delay on a short residential link count the same as a two-minute delay
-on an arterial. Measuring it as absolute delay makes the term additive, comparable
-across arcs, and interpretable: the congestion component of the objective is the
-total number of vehicle-seconds lost to traffic.
+**Delay fraction**, the quantity the objective uses:
+
+$$\lambda_e = 1 - \frac{t^0_e}{t_e} \in [0, 1)$$
+
+This is the fraction of the time spent on arc $e$ that is *lost* to congestion.
+A link running at free flow scores 0; one taking twice as long as free flow
+scores 0.5. It is bounded, which matters because it is aggregated along a path:
+the congestion of the shortest path from $i$ to $j$ is the travel-time-weighted
+mean of $\lambda_e$ over the road segments that path uses,
+
+$$\gamma_{ij} = \frac{\sum_{e \in P_{ij}} \lambda_e \, t_e}{\sum_{e \in P_{ij}} t_e} \in [0, 1]$$
+
+so $\gamma_{ij}$ is the fraction of that journey's duration spent in traffic. The
+congestion term of the objective, $w_C \sum \gamma_{ij} t_{ij} x_{ij}$, is then
+literally the number of vehicle-seconds the plan spends sitting in congestion,
+which is what makes it addable to the time term.
+
+**Delay ratio**, the quantity the interface colours by:
+
+$$\delta_e = \frac{t_e - t^0_e}{t^0_e} \in [0, \infty)$$
+
+This is delay expressed as a multiple of free-flow time, and it is unbounded: a
+blocked arterial can reach 30 or more. It is the right choice for a colour scale
+because it separates a badly congested road from a merely slow one, which the
+bounded measure compresses (both sit near 1). The map's bands, free flow, light,
+moderate, heavy and severe, are cut on $\delta_e$ at 0.10, 0.35, 0.75 and 1.50.
+
+The two are monotonically related, $\lambda = \delta / (1 + \delta)$, so neither
+is more correct; they answer different questions. The objective needs an additive,
+bounded quantity and uses $\lambda$. The display needs a discriminating one and
+uses $\delta$. Code that reads `edge_congestion` on the road network is getting
+$\lambda$; code that calls `congestion_level` in the traffic model is getting
+$\delta$.
 
 The last term prices the fleet. With $w_K > 0$ the model trades distance against the
 number of vehicles used, which is the trade-off a logistics operator actually faces.
