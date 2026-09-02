@@ -126,6 +126,25 @@ def _run_one(task: dict) -> dict:
         stop = StopCriteria(max_iterations=task.get("max_iterations", 1_000_000),
                             max_seconds=task.get("max_seconds", 10.0))
         result = _dispatch(algo, inst, stop, seed, params)
+
+        # A solver that returns nothing within its budget has not produced a
+        # result, and must not be recorded as a feasible one. OR-Tools does
+        # exactly this on large instances: it returns an empty assignment with
+        # an infinite cost, which was being written down as a feasible row and
+        # then poisoning every average it entered. "No solution found" is the
+        # honest outcome and is reported as such.
+        served = sum(len(r) for r in result.best.routes)
+        if not result.best.routes or served < inst.n_customers or not np.isfinite(result.best.cost):
+            return {
+                "instance": name, "algorithm": algo, "seed": seed,
+                "status": "no_solution",
+                "error": (f"returned no complete solution within {stop.max_seconds:g}s "
+                          f"({served} of {inst.n_customers} customers served)"),
+                "seconds": float(result.seconds),
+                "iterations": int(result.iterations),
+                "evaluations": int(result.evaluations),
+            }
+        result.best.validate(inst.n_customers)
         bks = inst.meta.get("bks")
         row = {
             "instance": name,
@@ -339,7 +358,8 @@ class BenchmarkRunner:
         from qroute.benchmark.stats import friedman, summarise as summarise_values
 
         ok = [r for r in rows if r.get("status") == "ok"]
-        failed = [r for r in rows if r.get("status") != "ok"]
+        failed = [r for r in rows if r.get("status") not in ("ok", "no_solution")]
+        no_solution = [r for r in rows if r.get("status") == "no_solution"]
         by: dict[tuple[str, str], list[dict]] = {}
         for r in ok:
             by.setdefault((r["instance"], r["algorithm"]), []).append(r)
@@ -379,8 +399,16 @@ class BenchmarkRunner:
         omnibus = None
         # The omnibus test needs a complete matrix, so only instances solved by
         # every algorithm take part; anything else would compare different sets.
-        common = [i for i in instances
-                  if all(f"{i}|{a}" in cells and cells[f"{i}|{a}"]["gap"] for a in algorithms)]
+        # A cell only counts as scored when its gap summary actually has values.
+        # summarise() returns {"n": 0} for an empty sample, which is truthy, so
+        # testing the dict alone let an unscored cell into the matrix and the
+        # omnibus test then failed on the missing key.
+        def _scored(instance: str, algorithm: str) -> bool:
+            cell = cells.get(f"{instance}|{algorithm}")
+            gap = cell.get("gap") if cell else None
+            return bool(gap) and gap.get("n", 0) > 0 and "median" in gap
+
+        common = [i for i in instances if all(_scored(i, a) for a in algorithms)]
         if len(algorithms) >= 3 and len(common) >= 3:
             per_algo = {a: [cells[f"{i}|{a}"]["gap"]["median"] for i in common] for a in algorithms}
             try:
@@ -408,6 +436,10 @@ class BenchmarkRunner:
             "n_ok": len(ok),
             "n_failed": len(failed),
             "n_infeasible": infeasible_total,
+            "n_no_solution": len(no_solution),
+            "no_solution": [{"instance": r["instance"], "algorithm": r["algorithm"],
+                             "seed": r["seed"], "reason": r.get("error")}
+                            for r in no_solution],
             "gap_policy": ("Gap statistics cover feasible runs only. Infeasible runs are "
                            "counted in infeasible_runs and their gaps, which are not "
                            "meaningful, are kept separately in gap_including_infeasible."),
