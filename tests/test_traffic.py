@@ -120,6 +120,14 @@ class TestBPR:
         slope = bpr.conical_multiplier(21.0) - bpr.conical_multiplier(20.0)
         assert slope == pytest.approx(2 * bpr.CONICAL_A, rel=1e-3)
 
+    def test_documented_crossover_value_is_the_measured_one(self):
+        """The docstring names x = 3.337; locate it numerically and check."""
+        xs = np.linspace(3.0, 3.7, 70001)
+        d = bpr.bpr_multiplier(xs) - bpr.conical_multiplier(xs)
+        crossover = float(xs[int(np.argmax(d > 0.0))])
+        assert crossover == pytest.approx(3.337, abs=5e-3)
+        assert "3.337" in bpr.__doc__
+
     def test_conical_b_requires_a_above_one(self):
         with pytest.raises(ValueError):
             bpr.conical_b(1.0)

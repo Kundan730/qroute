@@ -61,6 +61,8 @@ class HealthResponse(BaseModel):
     pyvrp_version: Optional[str] = None
     warmup: WarmUpInfo = Field(default_factory=WarmUpInfo)
     active_runs: int = 0
+    worker_start_method: Optional[str] = None
+    workers_primed: bool = False
 
 
 ParamKind = Literal["int", "float", "bool", "choice", "text"]

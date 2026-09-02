@@ -497,9 +497,13 @@ export function MapPage() {
           )}
         </RailSection>
 
-        {/* A failed or cancelled run has no solution to describe; showing an
-            empty card with a feasibility badge would imply otherwise. */}
-        {run.status && run.status.best_cost !== null && (
+        {/*
+          Shown only for a run of the instance currently on the map. A failed
+          run has no solution to describe, and a benchmark run's cost is in
+          abstract CVRPLIB units, so labelling it "distance in metres" here
+          would be a straightforward lie.
+        */}
+        {run.status && run.status.best_cost !== null && run.status.instance === map.instance?.name && (
           <RailSection title="Current solution">
             <StatGrid columns={2}>
               <Stat

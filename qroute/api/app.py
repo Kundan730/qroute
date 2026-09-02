@@ -87,9 +87,20 @@ async def lifespan(app: FastAPI):
         level=os.environ.get("QROUTE_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    STATE.runs = RunRegistry(STATE)
+    registry = RunRegistry(STATE)
+    STATE.runs = registry
+    # The fork server must be started before a road network is opened: see the
+    # module docstring of qroute.api.runs. This is the ordering that keeps
+    # solver processes from being killed by PROJ's atfork handler, so it happens
+    # here, synchronously, ahead of the background preload.
+    registry.prime()
     STATE.start_background_startup()
-    log.info("qroute API %s ready; warm-up and preload running in the background", __version__)
+    log.info(
+        "qroute API %s ready; solver workers use the %s start method; "
+        "warm-up and preload running in the background",
+        __version__,
+        registry.start_method,
+    )
     try:
         yield
     finally:
@@ -208,6 +219,8 @@ def _register_routes(app: FastAPI) -> None:
             "pyvrp_version": pyvrp_hgs.version(),
             "warmup": STATE.warmup,
             "active_runs": STATE.runs.active_count() if STATE.runs else 0,
+            "worker_start_method": STATE.runs.start_method if STATE.runs else None,
+            "workers_primed": bool(STATE.runs and STATE.runs.primed),
         }
 
     # -------------------------------------------------------- algorithms

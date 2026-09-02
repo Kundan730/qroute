@@ -193,8 +193,10 @@ class GeneticAlgorithm(Optimizer):
                     self.evaluations += 1
                 stall = 0
 
-            best = int(np.argmin(costs))
-            self.record(it, float(costs[best]), float(costs.mean()),
+            # The incumbent, not the population best: a restart can evict a good
+            # individual, and the history's best-cost column must be monotone if
+            # it is to be plotted against the other algorithms' curves.
+            self.record(it, float(self._best.cost), float(costs.mean()),
                         float(self._diversity(costs)), True)
         return it
 

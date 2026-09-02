@@ -171,34 +171,75 @@ def _run_one(task: dict) -> dict:
 DETERMINISTIC = {"ortools", "ortools_gls", "cpsat", "exact", "milp", "heldkarp"}
 
 
-def _call_with_supported(fn, inst, **kwargs):
-    """Call ``fn`` passing only the keyword arguments it actually accepts.
+#: Every solver names its time budget differently, and several take no random
+#: seed at all. Rather than force a uniform signature - which would misrepresent
+#: what each solver actually accepts - the dispatcher translates.
+_BUDGET_ALIASES = ("seconds", "time_limit", "max_seconds", "time_limit_seconds",
+                   "runtime", "max_runtime")
+_SEED_ALIASES = ("seed", "random_seed")
 
-    The external wrappers have deliberately different signatures - OR-Tools takes
-    no seed because its search is deterministic, CP-SAT takes a worker count
-    instead - so the dispatcher adapts rather than forcing a uniform signature
-    that would be a lie about what each solver does.
+
+def _call_with_supported(fn, inst, **kwargs):
+    """Call ``fn``, translating budget and seed names and dropping what it cannot take.
+
+    A wrapper that merely forwards ``**kwargs`` is transparent to introspection,
+    so the real signature has to be found by following the forwarding chain. When
+    that is not possible the call is attempted and any complaint about an
+    unexpected keyword is used to drop that keyword and retry, which converges
+    because each retry removes one argument.
     """
     import inspect
 
-    sig = inspect.signature(fn)
-    accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD
-                         for p in sig.parameters.values())
-    if accepts_kwargs:
-        # The wrapper forwards **kwargs to an inner function; inspect that one.
-        inner = getattr(fn, "__wrapped__", None)
-        target = inner or fn
+    def parameters_of(target):
         try:
-            allowed = set(inspect.signature(target).parameters)
+            sig = inspect.signature(target)
         except (TypeError, ValueError):
-            allowed = set(kwargs)
-        if any(p.kind is inspect.Parameter.VAR_KEYWORD
-               for p in inspect.signature(target).parameters.values()):
-            allowed |= set(kwargs)
-    else:
-        allowed = set(sig.parameters)
-    filtered = {k: v for k, v in kwargs.items() if k in allowed}
-    return fn(inst, **filtered)
+            return None, False
+        names = set(sig.parameters)
+        var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD
+                     for p in sig.parameters.values())
+        return names, var_kw
+
+    names, var_kw = parameters_of(fn)
+    target = fn
+    while var_kw:
+        inner = getattr(target, "__wrapped__", None)
+        if inner is None:
+            break
+        target = inner
+        names, var_kw = parameters_of(target)
+
+    call = dict(kwargs)
+    if names is not None:
+        # Translate the budget to whichever name this solver uses.
+        budget = next((call.pop(a) for a in _BUDGET_ALIASES if a in call), None)
+        if budget is not None:
+            for alias in _BUDGET_ALIASES:
+                if alias in names:
+                    call[alias] = budget
+                    break
+        seed = next((call.pop(a) for a in _SEED_ALIASES if a in call), None)
+        if seed is not None:
+            for alias in _SEED_ALIASES:
+                if alias in names:
+                    call[alias] = seed
+                    break
+        if not var_kw:
+            call = {k: v for k, v in call.items() if k in names}
+
+    for _attempt in range(len(call) + 1):
+        try:
+            return fn(inst, **call)
+        except TypeError as exc:
+            message = str(exc)
+            if "unexpected keyword argument" not in message:
+                raise
+            bad = message.rsplit("'", 2)
+            key = bad[-2] if len(bad) >= 2 else None
+            if key is None or key not in call:
+                raise
+            call.pop(key)
+    return fn(inst)
 
 
 def _dispatch(algo: str, inst, stop, seed: int, params: dict):

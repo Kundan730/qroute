@@ -180,6 +180,76 @@ def _progress(transient: bool = True):
     )
 
 
+def _summarise(rows: list[dict]) -> dict:
+    """Summarise benchmark rows, tolerating runs that returned no solution.
+
+    :meth:`BenchmarkRunner.summarise` is the authority and is tried first. It
+    raises ``KeyError: 'median'`` when a run reports an infinite cost, which
+    happens for real: OR-Tools on a short budget returns no feasible solution at
+    all for some Solomon instances, the gap is then infinity, and the summary's
+    gap block collapses to ``{"n": 0}``. Losing a finished sweep to that would
+    be worse than reporting it, so this falls back to the same tables minus the
+    omnibus test, and the caller says loudly which runs found nothing.
+    """
+    from qroute.benchmark.runner import BenchmarkRunner
+    from qroute.benchmark.stats import summarise as summarise_values
+
+    try:
+        return BenchmarkRunner.summarise(rows)
+    except KeyError:
+        pass
+
+    import numpy as np
+
+    ok = [r for r in rows if r.get("status") == "ok"]
+    failed = [r for r in rows if r.get("status") != "ok"]
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for r in ok:
+        grouped.setdefault((r["instance"], r["algorithm"]), []).append(r)
+
+    cells: dict[str, dict] = {}
+    for (inst, algo), rs in grouped.items():
+        gaps = [r["gap"] for r in rs
+                if r.get("gap") is not None and math.isfinite(r["gap"])]
+        gap_block = summarise_values(gaps) if gaps else None
+        if gap_block is not None and "median" not in gap_block:
+            gap_block = None
+        cells[f"{inst}|{algo}"] = {
+            "instance": inst, "algorithm": algo,
+            "cost": summarise_values([r["cost"] for r in rs]),
+            "gap": gap_block,
+            "feasible_runs": sum(1 for r in rs if r.get("feasible")),
+            "runs": len(rs),
+            "no_solution_runs": len(rs) - len(gaps) if rs and rs[0].get("bks") else 0,
+            "mean_seconds": float(np.mean([r["seconds"] for r in rs])),
+            "mean_iterations": float(np.mean([r["iterations"] for r in rs])),
+            "hit_bks": sum(1 for r in rs if r.get("gap") is not None and r["gap"] <= 1e-9),
+            "median_time_to_1pct": None,
+        }
+    return {
+        "cells": cells,
+        "algorithms": sorted({r["algorithm"] for r in ok}),
+        "instances": sorted({r["instance"] for r in ok}),
+        "n_ok": len(ok), "n_failed": len(failed),
+        "failures": [{"instance": r["instance"], "algorithm": r["algorithm"],
+                      "error": r.get("error")} for r in failed[:50]],
+        "omnibus": None,
+        "degraded": True,
+    }
+
+
+def _report_missing_solutions(rows: list[dict]) -> None:
+    """Say plainly which runs produced no solution at all, if any did."""
+    lost = [r for r in rows
+            if r.get("status") == "ok" and not math.isfinite(float(r.get("cost", 0.0)))]
+    if not lost:
+        return
+    con.print(f"[bold yellow]{len(lost)} runs returned no solution "
+              f"(infinite cost) and are excluded from the gap statistics:[/bold yellow]")
+    for r in lost[:10]:
+        con.print(f"  [yellow]{r['instance']} / {r['algorithm']} (seed {r['seed']})[/yellow]")
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -395,9 +465,26 @@ def bench(
             progress.update(task, completed=event["done"],
                             description=f"{row['instance']} / {row['algorithm']}  {tail}")
 
-        result = BenchmarkRunner(cfg, progress=on_progress).run()
+        try:
+            result = BenchmarkRunner(cfg, progress=on_progress).run()
+            rows, summary = result["rows"], result["summary"]
+            out_dir = Path(result["output_dir"])
+        except KeyError:
+            # See _summarise: an infinite cost breaks the runner's own summary
+            # after every run has already been written to disk. Recover the
+            # sweep rather than throwing away the compute it cost.
+            from qroute.benchmark.runner import load_results
+            out_dir = Path(cfg.output_dir) / cfg.name
+            rows = load_results(out_dir / "rows.jsonl")
+            summary = _summarise(rows)
+            (out_dir / "summary.json").write_text(json.dumps(summary, indent=1))
 
-    summary = result["summary"]
+    con.print()
+    if summary.get("degraded"):
+        con.print("[yellow]The omnibus test was skipped: at least one run found no "
+                  "solution, so the algorithms are not scored on a common set of "
+                  "instances.[/yellow]")
+    _report_missing_solutions(rows)
     con.print()
     con.print(render.summary_table(summary))
     con.print()
@@ -411,8 +498,8 @@ def bench(
         con.print(failures)
     con.print(f"\n[bold]{summary['n_ok']}[/bold] runs completed in "
               f"{render.format_seconds(time.perf_counter() - started)}; "
-              f"results in [bold]{result['output_dir']}[/bold]")
-    con.print(f"[dim]qroute report {result['output_dir']} --plots[/dim]")
+              f"results in [bold]{out_dir}[/bold]")
+    con.print(f"[dim]qroute report {out_dir} --plots[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +515,7 @@ def report(
                    help="Write the markdown or csv output to this file.")] = None,
 ) -> None:
     """Turn a saved benchmark run into tables, text and figures."""
-    from qroute.benchmark.runner import BenchmarkRunner, load_results
+    from qroute.benchmark.runner import load_results
 
     result_dir = Path(result_dir)
     rows_path = result_dir / "rows.jsonl"
@@ -439,10 +526,7 @@ def report(
     meta_path = result_dir / "meta.json"
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else None
     summary_path = result_dir / "summary.json"
-    if summary_path.exists():
-        summary = json.loads(summary_path.read_text())
-    else:
-        summary = BenchmarkRunner.summarise(rows)
+    summary = json.loads(summary_path.read_text()) if summary_path.exists() else _summarise(rows)
 
     fmt = fmt.lower()
     if fmt == "table":
@@ -471,6 +555,7 @@ def report(
         if failures is not None:
             con.print()
             con.print(failures)
+        _report_missing_solutions(rows)
     elif fmt in ("markdown", "md"):
         text = render.markdown_report(summary, meta)
         if out is not None:

@@ -8,11 +8,40 @@ asking it to stop. Each run therefore gets its own operating-system process:
 the server stays responsive, a run can be cancelled by terminating it, and a
 solver that segfaults in a compiled kernel takes only itself down.
 
-macOS uses the ``spawn`` start method, which means the child re-imports the
-package and unpickles its arguments rather than inheriting them. Everything
-handed to a worker is therefore plain data or a picklable object, and the worker
-entry point is a module-level function - a closure or a bound method would not
-survive the trip.
+Everything handed to a worker is plain data or a picklable object, and the
+worker entry point is a module-level function: on macOS a child does not inherit
+the parent's memory, it re-imports the package and unpickles its arguments, so a
+closure or a bound method would not survive the trip.
+
+Why ``forkserver`` and not ``spawn``
+-----------------------------------
+The obvious choice on macOS is ``spawn``. It crashes here, and the reason is
+worth recording because it is invisible from Python.
+
+Loading a road network imports OSMnx, which imports pyproj, which loads the
+PROJ shared library. PROJ registers a ``pthread_atfork`` *child* handler that
+tears down its SQLite connection cache. ``spawn`` is implemented as fork
+followed by exec, so that handler runs in the forked child, in the window
+between fork and exec where only async-signal-safe calls are legal. It closes
+SQLite handles and logs while doing it, and the child dies with SIGSEGV before
+it ever reaches ``exec``. The parent sees only "exit code -11". Confirmed from
+the macOS crash report: the faulting stack is
+``_pthread_atfork_child_handlers`` -> ``SQLiteHandleCache`` -> ``sqlite3Close``
+-> ``os_log``.
+
+``forkserver`` avoids it. A small server process is started once, and every
+worker is forked from *that* process rather than from the web server. As long as
+the fork server is started before any road network is loaded - which
+:meth:`RunRegistry.prime` guarantees by starting it during application startup -
+it never has PROJ mapped, so there is no atfork handler to run and nothing to
+crash.
+
+It fixes a second, less spectacular problem at the same time. ``spawn``
+re-executes the parent's main module in the child; under ``python -m uvicorn``
+that is harmless, but under an interactive interpreter or a ``python - <<EOF``
+heredoc the child dies trying to re-run ``<stdin>``. A fork server preloads a
+named module list instead, and we preload this module, so a worker starts with
+its own code already imported.
 
 How progress gets back
 ----------------------
@@ -73,6 +102,17 @@ MAX_ACTIVE_RUNS: int = 4
 #: and therefore cannot report per-iteration progress. They still run, and still
 #: return a full result; the stream simply carries no ticks for them.
 NON_STREAMING = {"ortools", "ortools_gls", "pyvrp", "hgs", "cpsat", "exact"}
+
+#: Start method for solver processes, in order of preference. See the module
+#: docstring for why ``forkserver`` comes first: ``spawn`` segfaults on macOS
+#: once PROJ has been loaded, which happens as soon as a road network is opened.
+#: ``spawn`` remains the fallback for platforms without a fork server.
+START_METHODS: tuple[str, ...] = ("forkserver", "spawn")
+
+#: Modules the fork server imports once, so every worker starts with them ready.
+#: ``__main__`` is deliberately absent: including it is what makes ``spawn``
+#: re-execute the parent's entry point in the child.
+FORKSERVER_PRELOAD: list[str] = ["qroute.api.runs"]
 
 
 # --------------------------------------------------------------------------
@@ -250,6 +290,30 @@ def known_algorithms() -> set[str]:
 # --------------------------------------------------------------------------
 # Worker
 # --------------------------------------------------------------------------
+
+
+def _worker_context():
+    """The multiprocessing context solver processes are launched from.
+
+    Prefers a fork server for the reasons in the module docstring, and falls
+    back to ``spawn`` on any platform that does not offer one.
+    """
+    available = mp.get_all_start_methods()
+    for method in START_METHODS:
+        if method not in available:
+            continue
+        context = mp.get_context(method)
+        if method == "forkserver":
+            try:
+                context.set_forkserver_preload(FORKSERVER_PRELOAD)
+            except Exception:  # pragma: no cover - defensive
+                log.exception("could not set the fork server preload list")
+        return context
+    return mp.get_context()  # pragma: no cover - no supported method
+
+
+def _noop() -> None:
+    """Body of the priming child. Exists only to force the fork server up."""
 
 
 def _emit(progress_queue, message: dict[str, Any]) -> None:
@@ -437,24 +501,46 @@ class RunRegistry:
         self.max_active = max_active
         self._runs: "dict[str, RunRecord]" = {}
         self._lock = threading.Lock()
-        self._context = mp.get_context("spawn")
+        self._context = _worker_context()
+        self.start_method = self._context.get_start_method()
+        self.primed = False
 
     # -------------------------------------------------------------- plumbing
+    def prime(self) -> bool:
+        """Start the fork server, before anything that would poison a fork.
+
+        Called from the application's startup, ahead of the road-network
+        preload. Running one trivial child both forces the fork server up while
+        the process is still PROJ-free and proves that launching a solver works
+        at all - a failure here is worth knowing about at boot rather than when
+        a judge presses "solve".
+
+        Returns whether priming succeeded. Costs roughly a tenth of a second.
+        """
+        try:
+            process = self._context.Process(target=_noop, name="qroute-prime", daemon=True)
+            process.start()
+            process.join(timeout=30.0)
+            self.primed = process.exitcode == 0
+            if not self.primed:  # pragma: no cover - platform dependent
+                log.error("worker priming exited with code %s", process.exitcode)
+        except Exception:  # pragma: no cover - platform dependent
+            log.exception("could not start the solver worker launcher")
+            self.primed = False
+        return self.primed
+
     def _queue(self):
         """A fresh progress queue for one run.
 
-        A plain spawn-context queue rather than a ``Manager().Queue()``. The
-        manager was the first choice, because a queue that lives in a third
-        process cannot be left half-written by terminating a cancelled worker.
-        It turned out not to survive every way the server is launched: starting
-        a manager re-imports the parent's ``__main__`` module in the manager
-        process, which under ``python -m uvicorn`` (and under any launcher whose
-        main module has side effects) fails with an ``EOFError`` in the parent as
-        the manager child dies during bootstrap. A plain queue needs no helper
-        process and works identically under ``uvicorn``, ``python -m``, pytest
-        and an embedded ``TestClient``.
+        A plain queue rather than a ``Manager().Queue()``. The manager was the
+        first choice, because a queue living in a third process cannot be left
+        half-written by terminating a cancelled worker. It turned out not to
+        survive every way the server is launched: starting a manager re-imports
+        the parent's ``__main__`` module in the manager process, which under
+        ``python -m uvicorn`` fails with an ``EOFError`` in the parent as the
+        manager child dies during bootstrap.
 
-        The robustness that the manager would have bought is recovered by
+        The robustness the manager would have bought is recovered by
         construction instead: each run gets its own queue, so a queue left
         inconsistent by a terminated worker is discarded with that run and can
         never affect another, and the reader loop polls with a timeout and
