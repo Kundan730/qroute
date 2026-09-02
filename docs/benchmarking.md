@@ -84,6 +84,16 @@ Per instance and algorithm:
 * number of runs that reached the reference value
 * number of runs that ended feasible, reported separately from cost, because a
   cheap infeasible solution is not a solution
+
+**Gap statistics cover feasible runs only.** This rule is not cosmetic. A plan
+that overloads a vehicle can be arbitrarily cheap, so averaging its gap into a
+headline figure flatters an algorithm at exactly the moment it has failed. The
+rule was added after a benchmark run showed three algorithms apparently beating
+the published best-known cost on B-n64-k9, which is impossible: each had
+returned an overloaded plan. Under the corrected rule one of them scores 10.6%
+rather than the 5.6% the mixed average had shown. Infeasible runs are counted
+and reported, never discarded silently, and their gaps are kept in a separate
+field that is clearly labelled as not meaningful.
 * median time and median iteration count to reach within 1% and 2% of the
   reference; a run that never got there is reported as "not reached" and is never
   silently dropped from the median

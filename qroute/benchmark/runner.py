@@ -346,19 +346,31 @@ class BenchmarkRunner:
 
         cells = {}
         for (inst, algo), rs in by.items():
-            gaps = [r["gap"] for r in rs if r.get("gap") is not None]
-            costs = [r["cost"] for r in rs]
+            # Gap statistics are computed over FEASIBLE runs only. The gap of an
+            # infeasible solution is not a result: a plan that overloads a
+            # vehicle can be arbitrarily cheap, and averaging it in makes an
+            # algorithm look better precisely when it has failed. Before this
+            # rule was applied, three algorithms appeared to beat a published
+            # best-known cost on B-n64-k9, which is impossible; every one of
+            # them had returned an overloaded plan. Infeasible runs are counted
+            # and reported separately so nothing is hidden.
+            feasible = [r for r in rs if r.get("feasible")]
+            gaps = [r["gap"] for r in feasible if r.get("gap") is not None]
+            gaps_all = [r["gap"] for r in rs if r.get("gap") is not None]
+            costs = [r["cost"] for r in feasible] or [r["cost"] for r in rs]
             cell = {
                 "instance": inst,
                 "algorithm": algo,
                 "cost": summarise_values(costs),
                 "gap": summarise_values(gaps) if gaps else None,
-                "feasible_runs": sum(1 for r in rs if r["feasible"]),
+                "gap_including_infeasible": summarise_values(gaps_all) if gaps_all else None,
+                "feasible_runs": len(feasible),
+                "infeasible_runs": len(rs) - len(feasible),
                 "runs": len(rs),
                 "mean_seconds": float(np.mean([r["seconds"] for r in rs])),
                 "mean_iterations": float(np.mean([r["iterations"] for r in rs])),
-                "hit_bks": sum(1 for r in rs if r.get("gap") is not None and r["gap"] <= 1e-9),
-                "median_time_to_1pct": _median_or_none([r.get("time_to_1pct") for r in rs]),
+                "hit_bks": sum(1 for r in feasible if r.get("gap") is not None and r["gap"] <= 1e-9),
+                "median_time_to_1pct": _median_or_none([r.get("time_to_1pct") for r in feasible]),
             }
             cells[f"{inst}|{algo}"] = cell
 
@@ -388,12 +400,17 @@ class BenchmarkRunner:
             except ValueError:
                 omnibus = None
 
+        infeasible_total = sum(c["infeasible_runs"] for c in cells.values())
         return {
             "cells": cells,
             "algorithms": algorithms,
             "instances": instances,
             "n_ok": len(ok),
             "n_failed": len(failed),
+            "n_infeasible": infeasible_total,
+            "gap_policy": ("Gap statistics cover feasible runs only. Infeasible runs are "
+                           "counted in infeasible_runs and their gaps, which are not "
+                           "meaningful, are kept separately in gap_including_infeasible."),
             "failures": [{"instance": r["instance"], "algorithm": r["algorithm"],
                           "error": r.get("error")} for r in failed[:50]],
             "omnibus": omnibus,

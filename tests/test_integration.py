@@ -174,3 +174,54 @@ def test_lower_bounds_never_exceed_the_known_optimum():
             if isinstance(value, (int, float)) and "bound" in key.lower() and value > 0:
                 assert value <= inst.meta["bks"] + 1e-6, \
                     f"{key} = {value} exceeds the optimum {inst.meta['bks']} on {name}"
+
+
+# --------------------------------------------------------------------------
+# Reporting honesty
+# --------------------------------------------------------------------------
+def test_gap_statistics_exclude_infeasible_runs():
+    """An infeasible run's gap must never enter a headline statistic.
+
+    A plan that overloads a vehicle can be arbitrarily cheap, so averaging its
+    gap in makes an algorithm look best exactly when it has failed. This was a
+    real defect: three algorithms once appeared to beat a published best-known
+    cost, and every one of them had returned an overloaded plan.
+    """
+    from qroute.benchmark.runner import BenchmarkRunner
+
+    rows = [
+        # a feasible run, 10% above the reference
+        {"status": "ok", "instance": "X", "algorithm": "a", "seed": 0, "cost": 110.0,
+         "gap": 10.0, "feasible": True, "seconds": 1.0, "iterations": 5, "n_routes": 2},
+        # an infeasible run that looks 20% better than the proven best
+        {"status": "ok", "instance": "X", "algorithm": "a", "seed": 1, "cost": 80.0,
+         "gap": -20.0, "feasible": False, "seconds": 1.0, "iterations": 5, "n_routes": 1},
+    ]
+    summary = BenchmarkRunner.summarise(rows)
+    cell = summary["cells"]["X|a"]
+    assert cell["infeasible_runs"] == 1
+    assert cell["feasible_runs"] == 1
+    assert cell["gap"]["mean"] == pytest.approx(10.0), "an infeasible gap leaked into the headline"
+    assert cell["gap"]["mean"] >= 0.0
+    assert summary["n_infeasible"] == 1
+
+
+def test_no_saved_benchmark_reports_a_negative_gap():
+    """Guard every result set on disk against the impossible."""
+    from pathlib import Path
+
+    from qroute.benchmark.runner import BenchmarkRunner, load_results
+
+    checked = 0
+    for rows_file in Path("results/runs").glob("*/rows.jsonl"):
+        rows = load_results(rows_file)
+        if not rows:
+            continue
+        checked += 1
+        summary = BenchmarkRunner.summarise(rows)
+        for key, cell in summary["cells"].items():
+            if cell.get("gap"):
+                assert cell["gap"]["best"] >= -1e-9, \
+                    f"{key} in {rows_file} claims to beat the reference cost"
+    if checked == 0:
+        pytest.skip("no saved benchmark results to check")

@@ -478,6 +478,7 @@ def test_the_concurrency_limit_holds_against_simultaneous_starts(client):
     def fire(seed: int):
         return client.post("/api/runs", json={**body, "seed": seed})
 
+    responses: list = []
     try:
         with ThreadPoolExecutor(max_workers=attempts) as pool:
             responses = list(pool.map(fire, range(attempts)))
