@@ -202,6 +202,20 @@ def solve_cvrp_cpsat(
     workers:
         Number of parallel search workers. Eight is the project default and
         matches the ten-core development machine without starving it.
+
+        Note what this costs: with more than one worker CP-SAT is **not**
+        reproducible under a wall-clock limit, seed or no seed, because the
+        workers race and whichever finishes a subproblem first changes the
+        search. Measured on A-n45-k7 with ``time_limit=30, seed=0``: two
+        ``workers=8`` runs returned 1243 and 1218 with dual bounds 917 and 859,
+        while two ``workers=1`` runs returned 1227 and bound 686 both times. A
+        *proof* is unaffected -- the optimum is the optimum whichever worker
+        finds it -- but an unproven incumbent or dual bound from this function
+        is a sample, not a constant. Use ``workers=1`` when a table has to be
+        byte-reproducible, and report several runs otherwise.
+    seed:
+        CP-SAT's random seed. It fixes the search only in combination with
+        ``workers=1``; see above.
     max_vehicles:
         Upper bound on the number of routes. ``None`` means the instance's own
         fleet limit if it has one, otherwise the number of customers, i.e. an

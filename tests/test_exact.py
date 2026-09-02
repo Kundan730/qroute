@@ -181,6 +181,23 @@ def test_cpsat_withholds_the_optimality_claim_when_scaling_is_inexact():
     assert sat.cost == pytest.approx(held_karp_tsp(cost).cost, rel=1e-3)
 
 
+def test_cpsat_is_reproducible_only_with_a_single_worker():
+    """Pins what the ``seed`` argument does and does not buy.
+
+    Multi-worker CP-SAT under a wall-clock limit is a race, so an *unproven*
+    incumbent or dual bound varies between identically seeded runs. Only the
+    single-worker path is byte-reproducible. A benchmark that quotes a CP-SAT
+    dual bound as if it were a constant is quoting one sample.
+    """
+    inst = load("A-n45-k7")  # far too hard to close in the budget below
+    a = solve_cvrp_cpsat(inst, time_limit=6, workers=1, seed=0)
+    b = solve_cvrp_cpsat(inst, time_limit=6, workers=1, seed=0)
+    assert not a.proven_optimal
+    assert a.cost == pytest.approx(b.cost)
+    assert a.lower_bound == pytest.approx(b.lower_bound)
+    assert a.routes == b.routes
+
+
 def test_cpsat_result_converts_to_optimization_result():
     inst = load(TINY)
     result = solve_cvrp_cpsat(inst, time_limit=60).to_optimization_result(inst)
