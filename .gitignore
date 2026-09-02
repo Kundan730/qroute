@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.prof
+
+# Node
+node_modules/
+frontend/dist/
+.vite/
+
+# Data caches (large downloads are re-fetchable; keep small curated files under data/)
+data/cache/
+data/osm/*.graphml
+!data/osm/.gitkeep
+
+# Results
+results/runs/
+*.log
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
