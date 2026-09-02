@@ -59,6 +59,12 @@ _MULT_AGREE_ZERO = 2.5     # 0.025*pi - both say 0 (see the note on tables below
 _MULT_DISAGREE_WORSE = 5.0    # 0.05*pi  - move toward the better string's bit
 _MULT_DISAGREE_BETTER = 1.0   # 0.01*pi  - keep the current bit, gently
 
+# How close to a pole counts as "already collapsed" in :meth:`QubitRegister.rotate`.
+# See the comment there: this must be loose enough to catch a state that is only
+# numerically on the pole (sin(pi) is 1.2e-16, not 0) and tight enough that a
+# register kept inside [eps, 1-eps] by the H-epsilon gate never touches it.
+_POLE_TOL = 1e-12
+
 
 class QubitRegister:
     """``m`` independent qubits stored as real amplitude pairs.
@@ -180,10 +186,26 @@ class QubitRegister:
             Base step size. The lookup table scales it per row.
         rng:
             Only consulted for the degenerate rows where a qubit has already
-            collapsed to exactly ``|0>`` or ``|1>`` and the rotation direction is
+            collapsed onto ``|0>`` or ``|1>`` and the rotation direction is
             genuinely arbitrary. Pass one for reproducibility; without it the
             tie is broken deterministically toward positive angles. In practice
-            :meth:`h_epsilon` keeps these rows from ever firing.
+            :meth:`h_epsilon` keeps these rows from ever firing, so they are
+            correctness insurance for hand-constructed states rather than a path
+            a run takes.
+
+        A caveat the first-order sign rule does not cover
+        ------------------------------------------------
+        The sign rule is a statement about the derivative at ``t = 0``, but the
+        step applied is finite. A qubit sitting closer to a pole than the step
+        size is carried straight past that pole, so its target probability moves
+        the wrong way for one call. With the module defaults this is reachable -
+        the largest table entry is ``5 * 0.01 * pi = 0.157`` rad while the
+        H-epsilon floor sits ``arcsin(sqrt(0.01)) = 0.100`` rad from the pole -
+        and it is harmless: the qubit lands slightly beyond the pole with one
+        amplitude's sign flipped, the very next :meth:`h_epsilon` call returns it
+        to the clamp boundary, and the quadrant rule reads the flipped sign
+        correctly. The net behaviour is saturation at the clamp, which is what a
+        register under sustained one-sided pressure is supposed to do.
 
         The lookup table
         ----------------
@@ -247,13 +269,27 @@ class QubitRegister:
         s = np.sign(ab)
         s = np.where(target == 1, s, -s)
 
-        # Degenerate rows: a fully collapsed qubit has ab == 0. If it already
-        # sits on the target bit no rotation is needed; if it sits on the
-        # opposite one, either direction moves it back, so the choice is free.
-        collapsed = ab == 0.0
+        # Degenerate rows: a collapsed qubit sits on a pole. If it already sits
+        # on the target bit no rotation is needed; if it sits on the opposite
+        # one, either direction moves it back, so the choice is free.
+        #
+        # The test is a tolerance on the probability, not an exact ``ab == 0``.
+        # An exact test is brittle in a way that bites: a state written as
+        # ``(alpha, beta) = (cos(pi), sin(pi))`` has ``beta = 1.2e-16`` rather
+        # than 0, so ``ab`` is nonzero, the guard misses, and the gate applies a
+        # full-size step to a qubit whose target probability is already 1 - the
+        # only thing such a step can do is move it *away* from its own target
+        # (P(1) goes from 1.5e-32 to 6.2e-5). The tolerance is set far below
+        # anything a run can reach: :meth:`h_epsilon` holds P(1) inside
+        # ``[eps, 1-eps]``, so with the default ``eps = 0.01`` no qubit ever
+        # comes within ten orders of magnitude of it, and this branch remains
+        # correctness insurance for hand-constructed states rather than a path
+        # the search takes.
+        p_now = self.beta * self.beta
+        collapsed = (p_now <= _POLE_TOL) | (p_now >= 1.0 - _POLE_TOL)
         if collapsed.any():
-            on_target = ((target == 1) & (self.alpha == 0.0)) | \
-                        ((target == 0) & (self.beta == 0.0))
+            on_target = ((target == 1) & (p_now >= 1.0 - _POLE_TOL)) | \
+                        ((target == 0) & (p_now <= _POLE_TOL))
             free = collapsed & ~on_target
             s = np.where(collapsed, 0.0, s)
             if free.any():

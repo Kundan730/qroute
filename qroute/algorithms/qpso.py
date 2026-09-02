@@ -108,6 +108,8 @@ class QPSO(Optimizer):
                  elite_fraction: float = 0.10,
                  restart_after: int = 60,
                  restart_fraction: float = 0.30,
+                 clone_prevention: bool = False,
+                 diversity_bias: float = 0.0,
                  local_search: bool = True,
                  ls_policy: str = "all",
                  ls_fraction: float = 0.25,
@@ -126,6 +128,7 @@ class QPSO(Optimizer):
                          mutation=mutation, mutation_rate=mutation_rate,
                          mutation_scale=mutation_scale, elite_fraction=elite_fraction,
                          restart_after=restart_after, restart_fraction=restart_fraction,
+                         clone_prevention=clone_prevention, diversity_bias=diversity_bias,
                          local_search=local_search, ls_policy=ls_policy,
                          ls_fraction=ls_fraction, neighbours=neighbours, **kw)
         self.M = int(swarm_size)
@@ -141,6 +144,8 @@ class QPSO(Optimizer):
         self.restart_fraction = float(restart_fraction)
         self.ls_policy = ls_policy
         self.ls_fraction = float(ls_fraction)
+        self.clone_prevention = bool(clone_prevention)
+        self.diversity_bias = float(diversity_bias)
         self.initial_keys = initial_keys
         self.decoder = decoder or Decoder(
             instance, neighbours=neighbours, local_search_rounds=local_search_rounds,
@@ -285,6 +290,34 @@ class QPSO(Optimizer):
                     P[i] = X[i]
                     proutes[i] = r
             self.evaluations += M
+
+            # --- clone prevention -------------------------------------------
+            # Hybridising a swarm with a strong local search has a failure mode
+            # that is easy to miss: every refined candidate is a local optimum,
+            # and distinct particles keep landing on the *same* one. The swarm
+            # then holds many copies of one solution, its effective size
+            # collapses, and it explores less than independent restarts would.
+            # Measurements on this platform showed exactly that, with multi-start
+            # local search beating the swarm at short budgets. Re-seeding a
+            # duplicate restores the lost independence at the cost of one
+            # evaluation.
+            if self.clone_prevention:
+                seen: dict[tuple, int] = {}
+                for i in range(M):
+                    key = tuple(tuple(r) for r in proutes[i]) if proutes[i] else ()
+                    if key and key in seen:
+                        X[i] = rng.uniform(0.0, 1.0, n)
+                        r, c, nk = dec.decode(X[i])
+                        if nk is not None:
+                            X[i] = nk
+                        costs[i] = c
+                        routes[i] = r
+                        pcost[i] = c
+                        P[i] = X[i]
+                        proutes[i] = r
+                        self.evaluations += 1
+                    else:
+                        seen[key] = i
 
             gnew = int(np.argmin(pcost))
             if pcost[gnew] < pcost[g] - 1e-10:

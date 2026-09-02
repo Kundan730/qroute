@@ -29,6 +29,19 @@ a property of time-limited search, not a bug, and it is why the benchmark
 reports several runs rather than one. Set ``solution_limit`` instead of
 ``seconds`` when a bit-for-bit reproducible run is needed.
 
+First solutions can fail
+------------------------
+The routing solver returns *no assignment at all* when its construction
+heuristic cannot reach a feasible starting point, and on tight-window Solomon
+instances ``path_cheapest_arc`` does exactly that. Measured on this machine
+with a five-second budget, seven of the fifty-six Solomon instances (R101,
+R102, R103, R105, R106, RC101, RC105) ended in ``ROUTING_FAIL_TIMEOUT`` with
+zero routes. A missing baseline row is not a neutral outcome -- it removes the
+strongest classical comparison from exactly the instances where it is most
+interesting -- so a failed attempt is retried with a different first-solution
+strategy (see ``fallback_first_solution``). ``parallel_cheapest_insertion``
+recovers all seven.
+
 Interface choice
 ----------------
 As with the exact solvers this is a function rather than an ``Optimizer``
@@ -82,6 +95,11 @@ class ORToolsResult:
     curve: list[tuple[float, float]] = field(default_factory=list)
     scale_factor: int = 1
     instance_name: str = ""
+    #: First-solution strategy that actually produced the returned routes. This
+    #: differs from the requested one when the request failed and a fallback ran.
+    first_solution_used: str = ""
+    #: Number of first-solution strategies tried, one per full time budget.
+    attempts: int = 1
 
     def to_optimization_result(self, instance: Instance, params: dict | None = None) -> OptimizationResult:
         if self.routes:
@@ -102,7 +120,9 @@ class ORToolsResult:
             for k, (t, cost) in enumerate(self.curve)
         ]
         merged = {"solver": "ortools-routing", "status": self.status,
-                  "scale_factor": self.scale_factor, "n_routes": self.n_vehicles}
+                  "scale_factor": self.scale_factor, "n_routes": self.n_vehicles,
+                  "first_solution_used": self.first_solution_used,
+                  "attempts": self.attempts}
         merged.update(params or {})
         return OptimizationResult(
             algorithm="ortools-gls",
@@ -126,6 +146,7 @@ def solve_ortools_result(
     vehicle_slack: int = 2,
     solution_limit: int | None = None,
     log: bool = False,
+    fallback_first_solution: tuple[str, ...] = ("parallel_cheapest_insertion", "savings"),
 ) -> ORToolsResult:
     """Run the OR-Tools routing solver on ``instance``.
 
@@ -142,6 +163,19 @@ def solve_ortools_result(
     solution_limit:
         Stop after this many improving solutions instead of on the clock. Use
         it when a reproducible run matters more than a fixed budget.
+    fallback_first_solution:
+        Strategies tried, in order, when the requested one returns *no*
+        assignment at all. Measured: on seven of the fifty-six Solomon
+        instances (R101-R103, R105, R106, RC101, RC105) ``path_cheapest_arc``
+        cannot construct a time-window-feasible first solution and the search
+        ends in ``ROUTING_FAIL_TIMEOUT`` with zero routes, while
+        ``parallel_cheapest_insertion`` finds one in the same budget. Without a
+        fallback the baseline is simply absent from those rows, which would
+        flatter every algorithm it is meant to be compared against. Each
+        fallback attempt gets its own full budget, so a run that needed one
+        took longer than ``seconds``: :attr:`ORToolsResult.seconds` is the
+        total wall clock and :attr:`ORToolsResult.attempts` says how many runs
+        it covers. Pass an empty tuple to disable the retry.
     """
     n = instance.size
     scaling = integer_scaling(instance.cost_matrix, instance.duration, instance.time_windows,
@@ -157,114 +191,147 @@ def solve_ortools_result(
         fleet = instance.min_vehicles + max(0, int(vehicle_slack))
     fleet = max(1, min(fleet, instance.n_customers))
 
-    manager = pywrapcp.RoutingIndexManager(n, fleet, 0)
-    routing = pywrapcp.RoutingModel(manager)
+    def _attempt(strategy: str) -> tuple[list[list[int]], float, str, list[tuple[float, float]], float]:
+        """Build the model from scratch and run it with one first-solution strategy.
 
-    def arc_cost(from_index: int, to_index: int) -> int:
-        return int(cost_i[manager.IndexToNode(from_index), manager.IndexToNode(to_index)])
+        The routing model has to be rebuilt for every attempt: a
+        ``RoutingModel`` that has already been solved cannot be re-solved with
+        different search parameters, and its callbacks capture the manager.
+        """
+        manager = pywrapcp.RoutingIndexManager(n, fleet, 0)
+        routing = pywrapcp.RoutingModel(manager)
 
-    transit = routing.RegisterTransitCallback(arc_cost)
-    routing.SetArcCostEvaluatorOfAllVehicles(transit)
+        def arc_cost(from_index: int, to_index: int) -> int:
+            return int(cost_i[manager.IndexToNode(from_index), manager.IndexToNode(to_index)])
 
-    # ------------------------------------------------------------- capacity
-    def demand_cb(from_index: int) -> int:
-        return int(demand[manager.IndexToNode(from_index)])
+        transit = routing.RegisterTransitCallback(arc_cost)
+        routing.SetArcCostEvaluatorOfAllVehicles(transit)
 
-    demand_idx = routing.RegisterUnaryTransitCallback(demand_cb)
-    routing.AddDimensionWithVehicleCapacity(
-        demand_idx,
-        0,                       # no slack: load cannot be dropped
-        [capacity] * fleet,
-        True,                    # start cumul at zero
-        "Capacity",
-    )
+        # ------------------------------------------------------------- capacity
+        def demand_cb(from_index: int) -> int:
+            return int(demand[manager.IndexToNode(from_index)])
 
-    # --------------------------------------------------------- time windows
-    if instance.has_time_windows:
-        travel_i = scaling.to_int(instance.duration)
-        service_i = scaling.to_int(
-            instance.service_time if instance.service_time is not None else np.zeros(n)
+        demand_idx = routing.RegisterUnaryTransitCallback(demand_cb)
+        routing.AddDimensionWithVehicleCapacity(
+            demand_idx,
+            0,                       # no slack: load cannot be dropped
+            [capacity] * fleet,
+            True,                    # start cumul at zero
+            "Capacity",
         )
-        tw_i = scaling.to_int(instance.time_windows)
-        horizon = int(tw_i[0, 1])
 
-        def time_cb(from_index: int, to_index: int) -> int:
-            i = manager.IndexToNode(from_index)
-            j = manager.IndexToNode(to_index)
-            # Service happens at the node we are leaving, the usual convention.
-            return int(travel_i[i, j] + service_i[i])
+        # --------------------------------------------------------- time windows
+        if instance.has_time_windows:
+            travel_i = scaling.to_int(instance.duration)
+            service_i = scaling.to_int(
+                instance.service_time if instance.service_time is not None else np.zeros(n)
+            )
+            tw_i = scaling.to_int(instance.time_windows)
+            horizon = int(tw_i[0, 1])
 
-        time_idx = routing.RegisterTransitCallback(time_cb)
-        routing.AddDimension(time_idx, horizon, horizon, False, "Time")
-        time_dim = routing.GetDimensionOrDie("Time")
-        for node in range(1, n):
-            idx = manager.NodeToIndex(node)
-            time_dim.CumulVar(idx).SetRange(int(tw_i[node, 0]), int(tw_i[node, 1]))
-        for v in range(fleet):
-            start, end = routing.Start(v), routing.End(v)
-            time_dim.CumulVar(start).SetRange(int(tw_i[0, 0]), horizon)
-            time_dim.CumulVar(end).SetRange(int(tw_i[0, 0]), horizon)
-            # Finalising start and end cumuls lets the solver shrink waiting time.
-            routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(start))
-            routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(end))
-    elif instance.max_route_duration is not None:
-        dur_i = scaling.to_int(instance.duration)
-        limit = int(round(instance.max_route_duration * scaling.factor))
+            def time_cb(from_index: int, to_index: int) -> int:
+                i = manager.IndexToNode(from_index)
+                j = manager.IndexToNode(to_index)
+                # Service happens at the node we are leaving, the usual convention.
+                return int(travel_i[i, j] + service_i[i])
 
-        def dur_cb(from_index: int, to_index: int) -> int:
-            return int(dur_i[manager.IndexToNode(from_index), manager.IndexToNode(to_index)])
+            time_idx = routing.RegisterTransitCallback(time_cb)
+            routing.AddDimension(time_idx, horizon, horizon, False, "Time")
+            time_dim = routing.GetDimensionOrDie("Time")
+            for node in range(1, n):
+                idx = manager.NodeToIndex(node)
+                time_dim.CumulVar(idx).SetRange(int(tw_i[node, 0]), int(tw_i[node, 1]))
+            for v in range(fleet):
+                start, end = routing.Start(v), routing.End(v)
+                time_dim.CumulVar(start).SetRange(int(tw_i[0, 0]), horizon)
+                time_dim.CumulVar(end).SetRange(int(tw_i[0, 0]), horizon)
+                # Finalising start and end cumuls lets the solver shrink waiting time.
+                routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(start))
+                routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(end))
+        elif instance.max_route_duration is not None:
+            dur_i = scaling.to_int(instance.duration)
+            limit = int(round(instance.max_route_duration * scaling.factor))
 
-        dur_idx = routing.RegisterTransitCallback(dur_cb)
-        routing.AddDimension(dur_idx, 0, limit, True, "Duration")
+            def dur_cb(from_index: int, to_index: int) -> int:
+                return int(dur_i[manager.IndexToNode(from_index), manager.IndexToNode(to_index)])
 
-    # ----------------------------------------------------------- parameters
-    params = pywrapcp.DefaultRoutingSearchParameters()
-    params.first_solution_strategy = _FIRST_SOLUTION[first_solution]
-    params.local_search_metaheuristic = _METAHEURISTIC[metaheuristic]
-    if solution_limit is not None:
-        params.solution_limit = int(solution_limit)
-    else:
-        params.time_limit.FromMilliseconds(int(seconds * 1000))
-    params.log_search = bool(log)
+            dur_idx = routing.RegisterTransitCallback(dur_cb)
+            routing.AddDimension(dur_idx, 0, limit, True, "Duration")
 
-    curve: list[tuple[float, float]] = []
-    t0 = time.perf_counter()
+        # ----------------------------------------------------------- parameters
+        params = pywrapcp.DefaultRoutingSearchParameters()
+        params.first_solution_strategy = _FIRST_SOLUTION[strategy]
+        params.local_search_metaheuristic = _METAHEURISTIC[metaheuristic]
+        if solution_limit is not None:
+            params.solution_limit = int(solution_limit)
+        else:
+            params.time_limit.FromMilliseconds(int(seconds * 1000))
+        params.log_search = bool(log)
 
-    def on_solution() -> None:
-        # CostVar().Max() is the objective of the solution just accepted.
-        curve.append((time.perf_counter() - t0, scaling.to_float(routing.CostVar().Max())))
+        curve: list[tuple[float, float]] = []
+        t0 = time.perf_counter()
 
-    routing.AddAtSolutionCallback(on_solution)
+        def on_solution() -> None:
+            # CostVar().Max() is the objective of the solution just accepted.
+            curve.append((time.perf_counter() - t0, scaling.to_float(routing.CostVar().Max())))
 
-    assignment = routing.SolveWithParameters(params)
-    seconds_taken = time.perf_counter() - t0
+        routing.AddAtSolutionCallback(on_solution)
 
+        assignment = routing.SolveWithParameters(params)
+        seconds_taken = time.perf_counter() - t0
+
+        routes: list[list[int]] = []
+        cost_value = float("inf")
+        if assignment is not None:
+            for v in range(fleet):
+                index = routing.Start(v)
+                route: list[int] = []
+                while not routing.IsEnd(index):
+                    node = manager.IndexToNode(index)
+                    if node != 0:
+                        route.append(int(node))
+                    index = assignment.Value(routing.NextVar(index))
+                if route:
+                    routes.append(route)
+            cost_value = scaling.to_float(assignment.ObjectiveValue())
+
+        status = routing_enums_pb2.RoutingSearchStatus.Value.Name(routing.status())
+        return routes, cost_value, status, curve, seconds_taken
+
+    # A first-solution strategy that fails returns no assignment at all, not a
+    # poor one, so falling back costs nothing in solution quality; it only
+    # spends more wall clock, which `attempts` and `seconds` both disclose.
+    strategies = [first_solution]
+    for name in fallback_first_solution:
+        if name not in strategies:
+            strategies.append(name)
+
+    total_seconds = 0.0
     routes: list[list[int]] = []
     cost_value = float("inf")
-    if assignment is not None:
-        for v in range(fleet):
-            index = routing.Start(v)
-            route: list[int] = []
-            while not routing.IsEnd(index):
-                node = manager.IndexToNode(index)
-                if node != 0:
-                    route.append(int(node))
-                index = assignment.Value(routing.NextVar(index))
-            if route:
-                routes.append(route)
-        cost_value = scaling.to_float(assignment.ObjectiveValue())
-
-    status = routing_enums_pb2.RoutingSearchStatus.Value.Name(routing.status())
+    curve: list[tuple[float, float]] = []
+    status = "ROUTING_NOT_SOLVED"
+    used = first_solution
+    attempts = 0
+    for strategy in strategies:
+        attempts += 1
+        used = strategy
+        routes, cost_value, status, curve, took = _attempt(strategy)
+        total_seconds += took
+        if routes:
+            break
 
     return ORToolsResult(
         routes=routes,
         cost=cost_value,
         status=status,
-        seconds=seconds_taken,
+        seconds=total_seconds,
         n_vehicles=len(routes),
         curve=curve,
         scale_factor=scaling.factor,
         instance_name=instance.name,
+        first_solution_used=used,
+        attempts=attempts,
     )
 
 

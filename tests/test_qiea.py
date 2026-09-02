@@ -368,3 +368,300 @@ def test_solomon_instance_with_time_windows():
                               population_size=6).solve()
     res.best.validate(inst.n_customers)
     assert np.isfinite(res.best_cost)
+
+
+# --------------------------------------------------------------------------
+# Adversarial verification pass: claims the docstrings make, turned into tests
+# --------------------------------------------------------------------------
+def _applied_angle_multiple(table: str, x_bit: int, b_bit: int, better: bool,
+                            phase: float = 0.7) -> float:
+    """Rotation actually applied, in multiples of ``delta_theta``.
+
+    Reads the angle straight off the amplitudes with ``arctan2`` rather than
+    inferring it from a probability, so the assertion is on the gate's own
+    parameter and not on a monotone function of it.
+    """
+    delta = 0.01 * PI
+    reg = QubitRegister(1, table=table,
+                        alpha=np.array([np.cos(phase)]),
+                        beta=np.array([np.sin(phase)]))
+    reg.rotate(np.array([x_bit], np.uint8), np.array([b_bit], np.uint8),
+               better, delta)
+    return float(np.arctan2(reg.beta[0], reg.alpha[0]) - phase) / delta
+
+
+def test_rotation_table_matches_the_documented_magnitudes_exactly():
+    """Every one of the eight table rows, in both tables, to the multiple.
+
+    The docstring publishes a lookup table and says the sign column is derived
+    rather than copied. That makes the table a claim about behaviour, so it is
+    checked as one: 2.5 for agreement, 5.0 to move onto a better reference's
+    bit, 1.0 to hold a better observation's own bit, 0.0 for an agreeing zero
+    under the literal 2002 table.
+    """
+    expected = {
+        # (x_i, b_i, x better): (symmetric, han_kim)
+        (0, 0, False): (-2.5, 0.0),
+        (0, 0, True): (-2.5, 0.0),
+        (0, 1, False): (+5.0, +5.0),
+        (0, 1, True): (-1.0, -1.0),
+        (1, 0, False): (-5.0, -5.0),
+        (1, 0, True): (+1.0, +1.0),
+        (1, 1, False): (+2.5, +2.5),
+        (1, 1, True): (+2.5, +2.5),
+    }
+    for (x_bit, b_bit, better), (sym, hk) in expected.items():
+        assert _applied_angle_multiple("symmetric", x_bit, b_bit, better) == \
+            pytest.approx(sym, abs=1e-9), (x_bit, b_bit, better, "symmetric")
+        assert _applied_angle_multiple("han_kim", x_bit, b_bit, better) == \
+            pytest.approx(hk, abs=1e-9), (x_bit, b_bit, better, "han_kim")
+
+
+def test_every_table_row_moves_probability_the_right_way_from_any_phase():
+    """Exhaustive sweep of the four-quadrant sign rule.
+
+    ``test_rotation_sign_is_correct_in_every_quadrant`` checks four amplitude
+    sign combinations at one magnitude. This walks the qubit right around the
+    circle, and covers all eight table rows rather than only the disagreeing
+    ones.
+
+    Phases within one step of a pole are excluded deliberately, not to make the
+    test pass: a *finite* rotation applied to a qubit that is already closer to
+    a pole than the step size overshoots straight past it, so the probability
+    can only move the other way. That is a property of any fixed-angle gate and
+    is asserted separately below, together with the two things that contain it -
+    the collapsed-qubit guard and the H-epsilon clamp.
+    """
+    step = 5.0 * 0.001 * PI                  # the largest multiple in the table
+    guard = 4.0 * step
+    phases = [p for p in np.linspace(0.0, 2 * PI, 241)
+              if min(abs(p - q) for q in (0.0, PI / 2, PI, 1.5 * PI, 2 * PI)) > guard]
+    assert len(phases) > 150
+    for phase in phases:
+        for x_bit in (0, 1):
+            for b_bit in (0, 1):
+                for better in (False, True):
+                    target = x_bit if better else b_bit
+                    for table in ("symmetric", "han_kim"):
+                        reg = QubitRegister(1, table=table,
+                                            alpha=np.array([np.cos(phase)]),
+                                            beta=np.array([np.sin(phase)]))
+                        p0 = float(reg.probabilities()[0])
+                        reg.rotate(np.array([x_bit], np.uint8),
+                                   np.array([b_bit], np.uint8),
+                                   better, 0.001 * PI)
+                        dp = float(reg.probabilities()[0]) - p0
+                        if table == "han_kim" and x_bit == 0 and b_bit == 0:
+                            assert abs(dp) < 1e-14      # the zero-magnitude row
+                        elif target == 1:
+                            assert dp > 0, (phase, x_bit, b_bit, better, table)
+                        else:
+                            assert dp < 0, (phase, x_bit, b_bit, better, table)
+
+
+def test_a_qubit_already_on_its_target_pole_is_left_alone():
+    """The collapsed-qubit guard must survive a merely numerical zero.
+
+    A qubit written as ``(cos(pi), sin(pi))`` has ``beta = 1.2e-16``, not 0. An
+    exact ``alpha * beta == 0`` guard misses that state, and the gate then
+    applies a full-size step to a qubit whose target probability is already 1 -
+    which can only push it off its own target. Both the exactly-zero and the
+    numerically-zero spellings of each pole must be no-ops.
+    """
+    cases = [
+        # (alpha, beta, target bit) - the qubit is already certain of the target
+        (1.0, 0.0, 0), (np.cos(PI), np.sin(PI), 0), (-1.0, 0.0, 0),
+        (0.0, 1.0, 1), (np.cos(PI / 2), np.sin(PI / 2), 1), (0.0, -1.0, 1),
+    ]
+    for a, b, target in cases:
+        reg = QubitRegister(1, alpha=np.array([a]), beta=np.array([b]))
+        p0 = float(reg.probabilities()[0])
+        bit = np.array([target], np.uint8)
+        reg.rotate(bit, bit, False, 0.05 * PI)
+        assert float(reg.probabilities()[0]) == pytest.approx(p0, abs=1e-15), (a, b, target)
+
+
+def test_a_collapsed_qubit_pointed_at_the_wrong_bit_is_rescued():
+    """The other degenerate row: on a pole, but on the *wrong* pole.
+
+    Here either rotation direction helps, so the gate must pick one and move,
+    rather than freezing the way it does when the qubit is already correct.
+    """
+    rng = np.random.default_rng(0)
+    for a, b, target in [(1.0, 0.0, 1), (np.cos(PI), np.sin(PI), 1),
+                         (0.0, 1.0, 0), (np.cos(PI / 2), np.sin(PI / 2), 0)]:
+        reg = QubitRegister(1, alpha=np.array([a]), beta=np.array([b]))
+        bit = np.array([target], np.uint8)
+        reg.rotate(bit, bit, False, 0.05 * PI, rng)
+        p = float(reg.probabilities()[0])
+        assert (p > 1e-6 if target == 1 else p < 1.0 - 1e-6), (a, b, target)
+
+
+def test_h_epsilon_keeps_the_register_out_of_the_overshoot_region():
+    """Why the finite-step overshoot never matters in a real run.
+
+    The largest table entry is ``5 * delta_theta``. A qubit can only be carried
+    past a pole if it sits closer to that pole than the step, and H-epsilon
+    holds every qubit at least ``arcsin(sqrt(eps))`` away from one. With the
+    module defaults those two numbers are within a factor of two of each other,
+    so the overshoot *can* happen - and when it does, the clamp simply puts the
+    qubit back at the boundary on the next call, which is exactly the intended
+    saturation behaviour rather than a lost degree of freedom.
+    """
+    eps = 0.01
+    reg = QubitRegister(1, alpha=np.array([np.sqrt(1 - eps)]),
+                        beta=np.array([np.sqrt(eps)]))
+    for _ in range(50):
+        # Sustained pressure toward 0 on a qubit already parked at the floor.
+        reg.rotate(np.zeros(1, np.uint8), np.zeros(1, np.uint8), False, 0.01 * PI)
+        reg.h_epsilon(eps)
+    p = float(reg.probabilities()[0])
+    assert p == pytest.approx(eps, abs=1e-12)
+    # The degree of freedom is still alive: the other bit is still observable.
+    rng = np.random.default_rng(0)
+    assert sum(int(reg.observe(rng)[0]) for _ in range(2000)) > 0
+
+
+def test_han_kim_table_drifts_a_register_toward_all_ones():
+    """The stated reason ``symmetric`` is the default, measured.
+
+    Under an unbiased reference string the literal 2002 table reinforces
+    agreeing ones but not agreeing zeros, so a register with no fitness signal
+    at all still drifts upward. ``symmetric`` must stay put.
+    """
+    drift = {}
+    for table in ("han_kim", "symmetric"):
+        rng = np.random.default_rng(0)
+        reg = QubitRegister(2000, table=table)
+        for _ in range(300):
+            x = reg.observe(rng)
+            b = (rng.random(2000) < 0.5).astype(np.uint8)   # carries no signal
+            reg.rotate(x, b, False, 0.01 * PI, rng)
+            reg.h_epsilon(0.01)
+        drift[table] = float(reg.probabilities().mean())
+    assert drift["han_kim"] > 0.60
+    assert drift["symmetric"] == pytest.approx(0.5, abs=0.05)
+
+
+@pytest.mark.parametrize("cls", [QIEA, QuantumRotationKeys])
+def test_gate_off_control_never_leaves_equal_superposition(cls, small_instance):
+    """``delta_theta=0`` must be a genuine no-rotation control.
+
+    The module docstring's ablation compares against this configuration, so the
+    control has to be real: with a zero angle every register must stay at
+    exactly one bit of entropy for the whole run, meaning the search degenerates
+    to repeated uniform sampling and nothing is learned.
+    """
+    res = cls(small_instance, StopCriteria(max_iterations=12), seed=5,
+              population_size=6, delta_theta=0.0).solve()
+    assert [h.diversity for h in res.history] == [1.0] * 12
+    res.best.validate(small_instance.n_customers)
+
+
+@pytest.mark.parametrize("cls", [QIEA, QuantumRotationKeys])
+def test_gate_on_converges_registers_to_the_h_epsilon_floor(cls, small_instance):
+    """With rotation enabled the registers do move, and they saturate.
+
+    This is the other half of the control: entropy must fall well below one bit.
+    It also documents where it stops - the binary entropy of ``eps`` itself, so
+    a "converged" register is pinned against the clamp rather than sitting
+    somewhere informative in between.
+    """
+    res = cls(small_instance, StopCriteria(max_iterations=30), seed=5,
+              population_size=6).solve()
+    eps = 0.01
+    floor = -(eps * np.log2(eps) + (1 - eps) * np.log2(1 - eps))
+    assert res.history[0].diversity > 0.9
+    assert res.history[-1].diversity < 0.5
+    assert res.history[-1].diversity == pytest.approx(floor, abs=0.15)
+
+
+def test_history_feasibility_is_measured_not_assumed(small_instance):
+    """The ``feasible`` column must be able to say False.
+
+    A convergence log that hard-codes True is worse than no column at all. An
+    impossible route-duration cap makes every solution infeasible, so every row
+    must report it, and the returned solution must own up to it too.
+    """
+    import dataclasses
+
+    impossible = dataclasses.replace(small_instance, max_route_duration=1.0,
+                                     meta=dict(small_instance.meta))
+    res = QuantumRotationKeys(impossible, StopCriteria(max_iterations=4), seed=0,
+                              population_size=4).solve()
+    assert [h.feasible for h in res.history] == [False] * 4
+    assert all(isinstance(h.feasible, bool) for h in res.history)
+    assert not res.best.is_feasible
+    assert impossible.evaluate(res.best.routes).total_violation > 0.0
+    res.best.validate(impossible.n_customers)
+
+    # ... and the same optimiser on the unmodified instance says True, so the
+    # column is not stuck in either position.
+    ok = QuantumRotationKeys(small_instance, StopCriteria(max_iterations=4),
+                             seed=0, population_size=4).solve()
+    assert all(h.feasible for h in ok.history)
+
+
+def test_qiea_slot_lookup_matches_a_dense_neighbour_matrix(small_instance):
+    """Guard the sparse slot table against the obvious dense implementation.
+
+    ``_slot`` is a flat dict rather than a ``(size, size)`` matrix purely to
+    keep memory linear in the node count. The two must agree everywhere,
+    including on the pairs that are absent from any neighbour list.
+    """
+    opt = QIEA(small_instance, StopCriteria(max_iterations=1), seed=0)
+    dense = np.full((opt.size, opt.size), -1, dtype=np.int32)
+    rows = np.repeat(np.arange(opt.size), opt.k)
+    dense[rows, opt.neigh.ravel()] = np.tile(np.arange(opt.k), opt.size)
+    for u in range(opt.size):
+        for v in range(opt.size):
+            assert opt._slot.get(u * opt.size + v, -1) == dense[u, v]
+    assert len(opt._slot) <= opt.size * opt.k
+
+
+def test_qiea_lamarckian_target_encodes_the_solution_not_the_draw(small_instance):
+    """The Lamarckian write-back must actually rewrite the rotation target.
+
+    A write-back that quietly returned the observation would leave the default
+    configuration identical to ``lamarckian=False`` while the docstring claimed
+    a large measured difference for it, so the difference is asserted directly:
+    the target mask must be sparse (about one arc per node) and must mark the
+    arcs of the decoded routes.
+    """
+    opt = QIEA(small_instance, StopCriteria(max_iterations=1), seed=0)
+    rng = np.random.default_rng(1)
+    bits = (rng.random(opt._register_size()) < 0.5).astype(np.uint8)
+    routes, _cost, new_keys = opt.decoder.decode(opt._keys_from_bits(bits))
+    target = opt._target_bits(bits, new_keys, routes)
+
+    assert not np.array_equal(target, bits)
+    assert target.sum() < bits.sum() / 2          # sparse, as documented
+    mask = target.reshape(opt.size, opt.k)
+    for route in routes:
+        prev = 0
+        for customer in route:
+            slot = opt._slot.get(prev * opt.size + customer, -1)
+            if slot >= 0:
+                assert mask[prev, slot] == 1
+            prev = customer
+
+
+@pytest.mark.parametrize("cls", [QIEA, QuantumRotationKeys])
+def test_result_params_record_the_decoder_configuration(cls, small_instance):
+    """A benchmark row has to say what produced it.
+
+    The penalty weights decide how far outside the feasible region the search
+    may look, and this module's default (``None``, meaning the decoder scales
+    them from the instance) differs from ``qpso.py``'s hard-coded 1000.0. A
+    comparison between the two is only interpretable if each result carries its
+    own setting, so the settings must survive into ``OptimizationResult.params``.
+    """
+    res = cls(small_instance, StopCriteria(max_iterations=2), seed=0,
+              population_size=4, penalty_capacity=250.0).solve()
+    for key in ("population_size", "delta_theta", "rotation_table", "lamarckian",
+                "epsilon", "neighbours", "local_search_rounds",
+                "penalty_capacity", "penalty_time_window", "penalty_duration",
+                "vehicle_cost"):
+        assert key in res.params, key
+    assert res.params["penalty_capacity"] == 250.0
+    assert res.params["penalty_time_window"] is None

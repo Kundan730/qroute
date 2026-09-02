@@ -72,6 +72,16 @@ EXTERNAL_SOLVERS = {
     "random": "random restart control baseline",
 }
 
+#: Solvers that take no seed, so repeating them under different seeds repeats
+#: the same configuration. ``solve_ortools`` has no seed argument at all: its
+#: guided local search is deterministic given the instance and the budget, and
+#: what little spread appears across "seeds" is the wall clock deciding how many
+#: improvement passes fit in the time limit, not a different sample. Anywhere
+#: the CLI reports dispersion over seeds it has to say so, or a zero standard
+#: deviation reads as a remarkably stable algorithm rather than one run
+#: repeated.
+SEED_BLIND_SOLVERS = frozenset({"ortools", "ortools_gls"})
+
 #: Where the API application object is expected to live. The API module is
 #: developed alongside this one, so ``serve`` probes rather than assuming.
 API_CANDIDATES = ("qroute.api.app:app", "qroute.api.main:app", "qroute.api:app")
@@ -379,11 +389,21 @@ def compare(
         scores = list(gaps) if bks else list(costs)
         if name == control:
             test = None
+            detail = None
         else:
             w = wilcoxon(control_scores, scores, (control, name))
-            test = Text(w.describe())
+            # A compact cell, not w.describe(): the full sentence is about fifty
+            # characters and the table has nine other columns, so off a wide
+            # terminal rich folds it one character to a line and the row becomes
+            # unreadable. The sentence is kept in the JSON output instead.
+            verdict = "=" if w.p_value > 0.05 else (
+                "control" if w.winner == control else name)
+            test = Text(f"p {render.format_p(w.p_value)}  {verdict}")
             if w.winner and w.p_value <= 0.05:
                 test.stylize("green" if w.winner == control else "yellow")
+            detail = {"p_value": float(w.p_value), "n": int(w.n),
+                      "winner": w.winner, "effect_size": float(w.effect_size),
+                      "text": w.describe()}
         entries.append({
             "algorithm": name,
             "runs": len(rs),
@@ -398,6 +418,7 @@ def compare(
             "iterations_per_second": float(np.mean([r["iterations"] / max(r["seconds"], 1e-9)
                                                     for r in rs])),
             "test": test,
+            "test_detail": detail,
         })
 
     con.print(render.compare_table(entries, inst.name, bks, control))
@@ -408,6 +429,11 @@ def compare(
     # every comparison is doomed to read "no significant difference" and a
     # reader could mistake that for evidence of equivalence. Say plainly that
     # the test had no power rather than letting the column imply a finding.
+    blind = [n for n in names if n.strip().lower() in SEED_BLIND_SOLVERS]
+    if blind and seeds > 1:
+        con.print(f"[yellow]{', '.join(blind)} take no seed, so the {seeds} runs behind that row "
+                  f"are the same configuration repeated; its spread is wall-clock noise in how "
+                  f"many passes fit the budget, not variation over seeds.[/yellow]")
     if len(names) > 1 and seeds >= 1:
         floor = 2.0 ** (1 - seeds)
         if floor > 0.05:
@@ -583,7 +609,12 @@ def report(
         if build_report is not None and out is None:
             built = build_report(rows, result_dir, summary=summary, meta=meta)
             written = built.get("files") or built.get("paths") or []
-            con.print(f"[dim]wrote {len(written) or 'the'} report files under[/dim] {result_dir}")
+            # This notice goes to stderr, not stdout: the whole point of the
+            # markdown format is that `qroute report --format markdown > x.md`
+            # produces a file that can be pasted into the submission, and a
+            # status line printed ahead of the document leaves a first line that
+            # is not markdown at all.
+            err.print(f"[dim]wrote {len(written) or 'the'} report files under[/dim] {result_dir}")
             report_md = Path(result_dir) / "report.md"
             if report_md.exists():
                 print(report_md.read_text())
@@ -591,7 +622,7 @@ def report(
             text = render.markdown_report(summary, meta)
             if out is not None:
                 Path(out).write_text(text)
-                con.print(f"[dim]wrote[/dim] {out}")
+                err.print(f"[dim]wrote[/dim] {out}")
             else:
                 print(text)
     elif fmt == "csv":

@@ -58,55 +58,89 @@ one and runs considerably faster, because the rotation update is a weak,
 positionally-independent learning signal.
 
 What was actually measured here, on this machine, equal 20-second wall-clock
-budget, 3 seeds, mean gap to best-known, runs executed serially. All three
-algorithms faced identical conditions, but the machine was not otherwise idle,
-so the whole protocol was repeated three times; the range over those repeats is
-given rather than a single column, because the generation counts moved by up to
-a factor of two between them:
+budget, seeds 1-3, mean gap to best-known, runs executed serially so no two
+algorithms ever competed for a core. Every reported solution was re-scored with
+``Instance.evaluate`` and checked with ``Solution.validate``; all were feasible
+and were exact permutations of the customer set.
 
-    ===========  =============  =============  ====================
-    instance     QPSO           QIEA           QuantumRotationKeys
-    ===========  =============  =============  ====================
-    A-n32-k5     0.00%          0.00%          0.00%
-    A-n45-k7     0.52 - 0.76%   0.00%          0.00%
-    A-n80-k10    2.31 - 2.36%   0.19 - 0.51%   0.62 - 0.98%
-    ===========  =============  =============  ====================
+    ===========  =============  =======  ====================
+    instance     QPSO           QIEA     QuantumRotationKeys
+    ===========  =============  =======  ====================
+    A-n32-k5     0.00%          0.00%    0.00%
+    A-n45-k7     0.06 - 0.41%   0.00%    0.00%
+    A-n80-k10    2.33 - 2.57%   0.55%    0.98%
+    ===========  =============  =======  ====================
 
-The ordering is stable across all three repeats even though the values are not.
-
-So on this benchmark both rotation-gate engines beat the project's QPSO, which
-is not the result the literature above would predict. Three caveats keep that
-from being a claim about quantum-inspired methods in general:
+The machine is shared, so absolute values move between repeats by a few tenths
+of a point and generation counts by more than that; the *ordering* has been
+stable across every repeat run so far. On this benchmark both rotation-gate
+engines beat the project's QPSO, which is not what the literature above would
+predict. Three things keep that from being a claim about quantum-inspired
+methods in general, and the second one matters more than the headline.
 
 * Three instances from one CVRP family is not evidence about algorithms; it is
   evidence about these instances. The full benchmark sweep is what should be
   quoted in the report.
-* Part of the margin is not the gate at all. Setting ``delta_theta=0`` disables
-  rotation entirely, leaving a randomised-restart control with the same
-  construction, split and local search. Same protocol, A-n80-k10:
 
-      ===================  =============  =============  ===========
-      configuration        QIEA           QRKeys         end entropy
-      ===================  =============  =============  ===========
-      gate off, theta=0    1.47%          2.44%          1.000 bits
-      gate on, literal HK  1.29%          1.89%          ~0.08 bits
-      gate on, Lamarckian  0.49%          0.89%          ~0.08 bits
-      ===================  =============  =============  ===========
+* **Almost none of the margin comes from the rotation gate itself.** Setting
+  ``delta_theta=0`` freezes every register at equal superposition, which leaves
+  a randomised-restart control with the same construction, split and local
+  search. A-n80-k10, 20 seconds, seeds 1-6:
 
-  The gate is worth about 1.0 and 1.6 percentage points respectively; the rest
-  comes from the representation and from local search. The entropy column is the
-  control working as intended - with no rotation the registers sit at 1 bit per
-  qubit for the whole run and never learn anything.
-* Part of the margin is a QPSO configuration artefact. QPSO's ``beta`` schedule
-  is keyed to ``max_iterations``, which a wall-clock benchmark leaves
-  effectively unbounded, so its contraction coefficient never anneals. Giving
-  QPSO a matching iteration cap improves it to 0.15% on A-n45-k7 (from 0.52%)
-  though it does not help on A-n80-k10. The schedule in this module uses
-  whichever budget is binding, precisely to avoid that trap.
+      ===========================  =======  =======  ===========
+      configuration                QIEA     QRKeys   end entropy
+      ===========================  =======  =======  ===========
+      gate off (``delta_theta=0``) 1.34%    2.54%    1.000 bits
+      gate on, literal Han-Kim     1.42%    2.32%    ~0.08 bits
+      gate on, Lamarckian target   0.50%    0.91%    0.08-0.14 bits
+      ===========================  =======  =======  ===========
 
-The ablation is the part worth keeping: the rotation gate does measurably work -
-it is not decoration - and the module reports what it measured rather than what
-would be flattering.
+  Read the first two rows against each other: with the literal Han-Kim update
+  the gate is worth -0.08 points on QIEA and +0.22 points on QRKeys, both well
+  inside the seed-to-seed spread (individual QIEA seeds range 0.96-1.99% in
+  both rows). The literal rotation gate, on these instances, does nothing
+  measurable. The whole of the improvement sits in the third row, and the only
+  thing that changes between rows two and three is *what the gate is aimed at*:
+  the encoding of the post-local-search solution instead of the raw draw. So
+  the honest statement is that the gate is a usable delivery mechanism for a
+  memetic learning signal, not that rotation is itself the source of the gain.
+
+  The entropy column is the control behaving correctly: with no rotation the
+  registers sit at exactly 1.000 bits per qubit for the whole run and learn
+  nothing. Note also what ~0.08 bits means - it is the binary entropy of
+  ``eps = 0.01`` exactly, so a converged register is not partially converged, it
+  is pinned against the H-epsilon clamp in every position. Past that point the
+  search is a 1%-per-bit mutation walk around the reference string, and the
+  gate has stopped contributing gradient.
+
+* The two engines do not share a decoder configuration by default, and that is
+  a confound rather than a fair fight. This module leaves ``penalty_*`` at
+  ``None`` so the decoder scales them from the instance (12.5 and 15.9 for
+  capacity on A-n45-k7 and A-n80-k10), while ``qpso.py`` hard-codes 1000.0, a
+  far stiffer wall around the feasible region. Swapping each one onto the
+  other's setting, same 20-second protocol, seeds 1-3:
+
+      ==========================  ==========  ===========
+      configuration               A-n45-k7    A-n80-k10
+      ==========================  ==========  ===========
+      QPSO, its own pen = 1000    0.41%       2.33%
+      QPSO, instance-scaled pen   0.20%       1.97%
+      QIEA, instance-scaled pen   0.00%       0.26%
+      QIEA, pen = 1000            0.00%       0.19%
+      ==========================  ==========  ===========
+
+  So the penalty choice is worth roughly 0.2-0.4 points to QPSO and nothing
+  measurable to QIEA, and the ordering survives removing it. It is still the
+  right thing to state, and it is the reason the penalty settings are now
+  recorded in ``OptimizationResult.params``: a benchmark row that does not say
+  which penalty weights produced it cannot be compared with one that does.
+
+An earlier draft of this docstring also blamed part of the margin on a QPSO
+schedule bug. That is no longer true and is recorded here so nobody re-derives
+it: ``qpso.beta()`` now keys its progress fraction to whichever budget is
+binding (verified: with ``max_seconds=10`` and ``max_iterations=1e9`` it anneals
+1.00 -> 0.75 -> 0.50 across the run), exactly as :meth:`_progress` does here.
+The QPSO column above was measured against that corrected schedule.
 """
 
 from __future__ import annotations
@@ -162,7 +196,18 @@ class _RotationOptimizer(Optimizer):
                          delta_theta=delta_theta, delta_theta_end=delta_theta_end,
                          theta_schedule=theta_schedule, epsilon=epsilon,
                          rotation_table=rotation_table, lamarckian=lamarckian,
-                         local_search=local_search, neighbours=neighbours, **kw)
+                         local_search=local_search, neighbours=neighbours,
+                         # Recorded so ``OptimizationResult.params`` says which
+                         # decoder configuration produced a benchmark row. The
+                         # penalty weights in particular are a real confound -
+                         # they change how far outside the feasible region the
+                         # search is allowed to look - and a comparison against
+                         # another optimiser is not interpretable without them.
+                         local_search_rounds=local_search_rounds,
+                         penalty_capacity=penalty_capacity,
+                         penalty_time_window=penalty_time_window,
+                         penalty_duration=penalty_duration,
+                         vehicle_cost=vehicle_cost, **kw)
         if theta_schedule not in ("fixed", "linear", "exponential"):
             raise ValueError(f"unknown theta schedule {theta_schedule!r}")
         self.P = int(population_size)
@@ -299,7 +344,7 @@ class _RotationOptimizer(Optimizer):
             # the reference evaluator (once per generation, not once per
             # individual) keeps the convergence log from claiming feasibility it
             # has not checked.
-            feasible = self.instance.evaluate(incumbent).is_feasible if incumbent else False
+            feasible = bool(self.instance.evaluate(incumbent).is_feasible) if incumbent else False
             self.record(it, float(best_cost[g]), float(costs.mean()), entropy, feasible)
         return it
 
@@ -385,11 +430,22 @@ class QIEA(_RotationOptimizer):
         self._unvisited = np.zeros(self.size, dtype=bool)
         self._tour = np.zeros(self.n, dtype=np.int32)
         self._keys = np.zeros(self.n, dtype=np.float64)
-        # Position of node v in u's neighbour list, or -1. Built once so the
-        # Lamarckian write-back does not have to search the list per arc.
-        self._slot = np.full((self.size, self.size), -1, dtype=np.int32)
-        rows = np.repeat(np.arange(self.size), self.k)
-        self._slot[rows, self.neigh.ravel()] = np.tile(np.arange(self.k), self.size)
+        # Position of node v in u's neighbour list. Built once so the Lamarckian
+        # write-back does not have to search the list per arc.
+        #
+        # A dense ``(size, size)`` int32 matrix would be the obvious structure
+        # and was the first implementation, but it is quadratic in the node
+        # count for a mapping that has only ``size * k`` real entries: 4 MB at
+        # n = 1000 and 400 MB at n = 10000, allocated whether or not the
+        # Lamarckian target is ever asked for. A flat dict keyed by
+        # ``u * size + v`` holds the same information in O(n*k), and since the
+        # lookup happens inside a per-arc Python loop anyway, a dict ``get`` is
+        # if anything cheaper than scalar numpy indexing.
+        rows = np.repeat(np.arange(self.size, dtype=np.int64), self.k)
+        cols = self.neigh.ravel().astype(np.int64)
+        slots = np.tile(np.arange(self.k, dtype=np.int64), self.size)
+        self._slot: dict[int, int] = dict(
+            zip((rows * self.size + cols).tolist(), slots.tolist()))
 
     def _register_size(self) -> int:
         return int(self.size * self.k)
@@ -438,22 +494,34 @@ class QIEA(_RotationOptimizer):
         one set bit per node against roughly ``k/2`` in an observation - so the
         agreeing-zero rows of the table dominate and the register might commit
         far too early. Measured, it does not. On A-n80-k10 at a 20-second budget
-        over 3 seeds the mean gap to best-known falls from 1.29% under the
-        literal Han-Kim update to 0.49% with the write-back, and the run
-        completes *more* generations (73 against 57) because sharper masks build
-        better tours for local search to start from. Final register entropy is
-        about 0.08 bits either way, so the feared extra collapse does not show
-        up.
+        over seeds 1-6 the mean gap to best-known falls from 1.42% under the
+        literal Han-Kim update to 0.50% with the write-back, and the run
+        completes *more* generations (about 90 against about 77) because sharper
+        masks build better tours for local search to start from. Final register
+        entropy is about 0.08 bits either way, so the feared extra collapse does
+        not show up.
+
+        The ablation in the module docstring puts this in context and is not
+        flattering to the gate: a ``delta_theta=0`` control scores 1.34%, so the
+        literal update buys nothing at all and *this* write-back is the entire
+        measured benefit of turning rotation on.
 
         It is therefore on by default, with ``lamarckian=False`` available to
         recover the literal Han-Kim update. This is a deliberate deviation from
         the 2002 paper and is flagged as such.
+
+        Only the depot-out and customer-to-customer arcs are encoded; the
+        closing arc back to the depot is left out because node 0's own qubit row
+        is what the construction reads when it *starts* a tour, and marking the
+        return arc there would fight that.
         """
         mask = np.zeros((self.size, self.k), dtype=np.uint8)
+        slot = self._slot
+        size = self.size
         for route in routes:
             prev = 0
             for c in route:
-                s = self._slot[prev, c]
+                s = slot.get(prev * size + c, -1)
                 if s >= 0:
                     mask[prev, s] = 1
                 prev = c
@@ -489,34 +557,36 @@ class QuantumRotationKeys(_RotationOptimizer):
       pressure that carries no fitness signal, and the effective search is
       diluted across ``n * b`` variables instead of ``n``.
 
-    Measured twice on this machine, 10-second budget, population 20, 3 seeds,
-    mean gap to best-known on A-n80-k10. The two sweeps ran under different
-    machine load, which is exactly why both are shown - a single tidy column
-    would overstate how much of this is signal:
+    Measured three times on this machine, 10-second budget, population 20,
+    seeds 1-3, mean gap to best-known on A-n80-k10. The sweeps ran under
+    different machine load, which is exactly why all three are shown - a single
+    tidy column would overstate how much of this is signal:
 
-    ========  =========  =========
-    ``bits``  sweep 1    sweep 2
-    ========  =========  =========
-    4         1.72%      2.70%
-    6         1.27%      1.34%
-    8         1.15%      1.36%
-    10        0.91%      1.04%
-    12        1.06%      1.30%
-    14        0.34%      2.34%
-    16        0.68%      1.76%
-    ========  =========  =========
+    ========  =========  =========  =========
+    ``bits``  sweep 1    sweep 2    sweep 3
+    ========  =========  =========  =========
+    4         1.72%      2.70%      1.70%
+    6         1.27%      1.34%      1.29%
+    8         1.15%      1.36%      1.10%
+    10        0.91%      1.04%      1.02%
+    12        1.06%      1.30%      1.59%
+    14        0.34%      2.34%      1.87%
+    16        0.68%      1.76%      1.29%
+    ========  =========  =========  =========
 
     A-n45-k7 is not tabulated because every depth solved it to best-known in
-    both sweeps; it is too easy to separate the settings.
+    every sweep; it is too easy to separate the settings.
 
-    Two conclusions survive both sweeps and one does not.
+    One conclusion survives all three sweeps; the others do not.
 
-    * The collision argument is real at the bottom: 4 bits gives 16 levels for
-      79 customers and is the worst setting in both runs, by a clear margin.
-    * ``b = 10`` is consistently good (0.91%, 1.04%).
-    * The apparent excellence of 14 bits in sweep 1 does **not** replicate
-      (0.34% against 2.34%). Above about 8 bits the differences are inside the
-      run-to-run spread and must not be read as a ranking.
+    * ``b = 10`` is the best or joint-best setting in every sweep (0.91%, 1.04%,
+      1.02%) and is the default for that reason.
+    * The collision argument is directionally right at the bottom - 4 bits gives
+      16 levels for 79 customers and is never good - but "worst by a clear
+      margin" overstates it: in sweep 3 four bits (1.70%) beat both 12 and 14.
+    * No ranking above ``b = 8`` replicates. 14 bits was the best setting in
+      sweep 1 (0.34%) and the worst in sweep 3 (1.87%). Treat everything above
+      8 bits as tied, and do not quote a single column of this table.
 
     Note also that the penalty for collisions is far gentler than the birthday
     bound alone suggests, because local search repairs most of the damage a tied
@@ -527,8 +597,10 @@ class QuantumRotationKeys(_RotationOptimizer):
     Note also that a key's *value* has no meaning of its own - only the induced
     ordering does - yet the genotype is positional. Two orderings that differ by
     one adjacent swap can require flipping high-order bits of both customers.
-    This mismatch is a genuine weakness of the encoding and part of why the
-    measured results below favour QPSO on larger instances.
+    That mismatch is a genuine weakness of the encoding, and it is the most
+    likely reason this class trails :class:`QIEA`, whose bits name arcs and are
+    therefore locally meaningful, on every instance measured in the module
+    docstring above.
     """
 
     name = "QuantumRotationKeys"

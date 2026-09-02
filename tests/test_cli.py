@@ -15,6 +15,7 @@ library the CLI is a front end for.
 
 from __future__ import annotations
 
+import io
 import json
 import math
 from pathlib import Path
@@ -37,6 +38,13 @@ OSM_DIR = REPO_ROOT / "data" / "osm"
 def invoke(*args: str, **kwargs):
     """Run the application with a wide terminal so tables are not truncated."""
     return runner.invoke(app, list(args), env=WIDE, **kwargs)
+
+
+def render_to_text(renderable) -> str:
+    """Render a rich table to plain text, wide enough not to truncate a column."""
+    console = render.console(width=200, no_color=True, record=True, file=io.StringIO())
+    console.print(renderable)
+    return console.export_text()
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +333,20 @@ def test_report_markdown_without_an_output_file_writes_the_report(swept: Path):
     assert "|" in result.output
 
 
+def test_report_markdown_keeps_status_lines_off_stdout(swept: Path):
+    """`qroute report --format markdown > x.md` must produce a markdown file.
+
+    The command also says where it wrote the report files. That notice belongs
+    on stderr: printed to stdout it becomes the first line of the redirected
+    document, which is then not markdown at all.
+    """
+    pytest.importorskip("qroute.benchmark.report")
+    result = invoke("report", str(swept), "--format", "markdown")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.lstrip().startswith("#"), result.stdout[:200]
+    assert "wrote" not in result.stdout.splitlines()[0]
+
+
 def test_report_rejects_an_unknown_format(swept: Path):
     assert invoke("report", str(swept), "--format", "latex").exit_code == 1
 
@@ -503,6 +525,65 @@ def test_osm_demo_reoptimises_after_an_incident(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # Rendering helpers
 # ---------------------------------------------------------------------------
+def test_console_widens_itself_when_the_output_is_redirected():
+    """Redirected output must not be squeezed into rich's eighty-column default.
+
+    At eighty columns the ten-column per-cell table shortens every figure to an
+    ellipsis, so a judge who redirects the report to a file gets a table with no
+    numbers in it. An explicit width and a COLUMNS setting both still win.
+    """
+    redirected = render.console(file=io.StringIO())
+    assert redirected.width == render.REDIRECT_WIDTH
+    assert render.console(file=io.StringIO(), width=120).width == 120
+
+
+def test_console_respects_an_explicit_columns_setting(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "132")
+    assert render.console(file=io.StringIO()).width == 132
+
+
+def test_omnibus_table_separates_the_raw_and_the_corrected_p_value():
+    """Both p-values must be visible, and labelled which is which.
+
+    The runner stores a pre-formatted sentence whose "p" is the Holm-corrected
+    value. Printing only that shows 1 where the signed-rank test actually
+    returned 0.875, and disagrees with the API, which reports the raw value for
+    the same pair.
+    """
+    omnibus = {
+        "instances_used": ["A-n32-k5", "P-n16-k8", "A-n60-k9", "B-n64-k9"],
+        "statistic": 2.2, "p_value": 0.699, "control": "ga",
+        "mean_ranks": {"ga": 2.0, "qpso": 3.5},
+        "post_hoc": [{"a": "ga", "b": "qpso", "p": 0.875, "p_holm": 1.0,
+                      "effect": -0.2, "winner": "ga",
+                      "text": "ga vs qpso: no significant difference (p = 1, n = 4)"}],
+    }
+    text = render_to_text(render.omnibus_table(omnibus))
+    assert "0.875" in text, text
+    assert "p (Holm)" in text
+    assert "corrected across the family" in text
+
+
+def test_omnibus_table_names_the_winner_only_when_the_correction_survives():
+    base = {"instances_used": ["a", "b", "c", "d", "e", "f"], "statistic": 9.0,
+            "p_value": 0.01, "control": "ga", "mean_ranks": {"ga": 1.2, "qpso": 3.8}}
+    significant = dict(base, post_hoc=[{"a": "ga", "b": "qpso", "p": 0.001,
+                                        "p_holm": 0.004, "winner": "ga"}])
+    assert "ga is better" in render_to_text(render.omnibus_table(significant))
+    not_significant = dict(base, post_hoc=[{"a": "ga", "b": "qpso", "p": 0.03,
+                                            "p_holm": 0.12, "winner": "ga"}])
+    text = render_to_text(render.omnibus_table(not_significant))
+    assert "is better" not in text
+    assert "no significant difference after correction" in text
+
+
+def test_format_p_is_compact_and_survives_a_missing_value():
+    assert render.format_p(0.0625) == "0.0625"
+    assert render.format_p(1.0) == "1"
+    assert render.format_p(None) == "-"
+    assert render.format_p(float("nan")) == "-"
+
+
 def test_gap_style_bands_are_ordered_from_good_to_bad():
     assert render.gap_style(0.0) == "bold bright_green"
     assert render.gap_style(0.2) == "green"
@@ -521,13 +602,20 @@ def test_a_cost_below_the_best_known_is_flagged_not_celebrated():
     assert render.GAP_SUSPECT_STYLE != "bold bright_green"
 
 
-def test_hit_bks_is_marked_when_a_run_in_the_cell_was_infeasible():
-    clean = {"runs": 2, "feasible_runs": 2, "hit_bks": 1}
-    tainted = {"runs": 2, "feasible_runs": 1, "hit_bks": 1}
-    assert str(render._hit_bks_text(clean)) == "1"
-    assert str(render._hit_bks_text(tainted)) == "1!"
-    # A cell that hit nothing needs no marker even if a run was infeasible.
-    assert str(render._hit_bks_text({"runs": 2, "feasible_runs": 1, "hit_bks": 0})) == "0"
+def test_cell_table_reports_feasibility_beside_every_gap():
+    """The gap columns mean nothing without the feasibility count next to them.
+
+    The runner restricts gap statistics and the best-known hit count to feasible
+    runs, so the table's job is to keep the reader's eye on how many runs of the
+    cell were actually feasible.
+    """
+    summary = {"cells": {"A/qpso": {
+        "instance": "A-n32-k5", "algorithm": "qpso", "runs": 3, "feasible_runs": 2,
+        "gap": {"best": 0.0, "median": 1.0, "mean": 1.0, "std": 0.5},
+        "cost": {"median": 800.0}, "hit_bks": 1, "median_time_to_1pct": 0.5,
+    }}}
+    text = render_to_text(render.cell_table(summary))
+    assert "2/3" in text
 
 
 def test_format_gap_and_numbers_never_print_nan():

@@ -324,6 +324,53 @@ def test_ortools_respects_time_windows():
     assert sol.cost == pytest.approx(raw.cost, abs=1e-6)
 
 
+def test_ortools_recovers_when_the_first_solution_strategy_fails():
+    """R101 defeats path_cheapest_arc; the baseline must still produce a row.
+
+    Measured: with a five-second budget seven Solomon instances (R101-R103,
+    R105, R106, RC101, RC105) end in ROUTING_FAIL_TIMEOUT with *zero* routes
+    under the default construction heuristic. Silently returning an empty
+    solution there would delete the strongest classical baseline from precisely
+    the hardest time-window instances, so a fallback strategy is tried.
+    """
+    inst = load("R101")
+
+    without = solve_ortools_result(inst, seconds=5, fallback_first_solution=())
+    assert not without.routes, "R101 no longer defeats path_cheapest_arc; retune this test"
+
+    with_fallback = solve_ortools_result(inst, seconds=5)
+    assert with_fallback.routes
+    assert with_fallback.attempts == 2
+    assert with_fallback.first_solution_used == "parallel_cheapest_insertion"
+    sol = inst.make_solution(with_fallback.routes)
+    sol.validate(inst.n_customers)
+    assert sol.stats.time_window_violation == pytest.approx(0.0)
+    assert sol.stats.capacity_violation == pytest.approx(0.0)
+    assert sol.cost == pytest.approx(with_fallback.cost, abs=1e-6)
+
+
+@pytest.mark.parametrize("name", ["P-n16-k8", "A-n45-k7", "C201"])
+def test_baseline_reported_cost_equals_the_project_evaluator(name):
+    """The docstring claim that re-scoring catches a scaling mistake, checked.
+
+    Both wrappers report their own solver's objective. If the integer scaling
+    were wrong that number would differ from what the project evaluator makes
+    of the same routes, so the two are compared here rather than merely
+    asserted in prose.
+    """
+    inst = load(name)
+    raw = solve_ortools_result(inst, seconds=5)
+    sol = inst.make_solution(raw.routes)
+    sol.validate(inst.n_customers)
+    assert sol.cost == pytest.approx(raw.cost, abs=1e-6)
+
+    if pyvrp_available():
+        praw = solve_pyvrp_result(inst, max_iterations=300, seed=0)
+        psol = inst.make_solution(praw.routes)
+        psol.validate(inst.n_customers)
+        assert psol.cost == pytest.approx(praw.cost, abs=1e-6)
+
+
 def test_ortools_returns_an_optimization_result():
     inst = load("A-n32-k5")
     result = solve_ortools(inst, seconds=5)
