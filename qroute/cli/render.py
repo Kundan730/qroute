@@ -40,10 +40,19 @@ from rich.text import Text
 # Block characters from lowest to highest, used by :func:`sparkline`.
 BLOCKS = "▁▂▃▄▅▆▇█"
 
+#: Style for a cost that came in *below* the published best-known value. On the
+#: classic CVRPLIB and Solomon sets those values have stood for years, so a
+#: negative gap from a few seconds of search is almost never a new record: it is
+#: the signature of a solution that violates a constraint, and whose cost is
+#: therefore not comparable with the reference at all. Colouring it like a win
+#: would invite exactly the wrong reading, so it gets its own "look at this"
+#: style and the feasibility column beside it is the one to check.
+GAP_SUSPECT_STYLE = "bold magenta"
+
 #: ``(upper bound on gap in percent, rich style)``, checked in order. A gap at
 #: or below the bound takes that style; anything above every bound is red.
 GAP_BANDS: tuple[tuple[float, str], ...] = (
-    (1e-9, "bold bright_green"),   # matched or beat the best known solution
+    (1e-9, "bold bright_green"),   # matched the best known solution
     (0.5, "green"),
     (1.5, "yellow"),
     (5.0, "dark_orange"),
@@ -69,6 +78,10 @@ def gap_style(gap: Optional[float]) -> str:
     """Rich style for a percentage gap; see :data:`GAP_BANDS`."""
     if gap is None or not math.isfinite(gap):
         return "dim"
+    # Below the published value by more than floating-point residue: flag it
+    # rather than celebrate it. See GAP_SUSPECT_STYLE.
+    if gap < -1e-9:
+        return GAP_SUSPECT_STYLE
     for bound, style in GAP_BANDS:
         if gap <= bound:
             return style
@@ -161,19 +174,34 @@ def sparkline(values: Sequence[float], width: int = 48) -> str:
 
 def convergence_line(history: Sequence[Mapping[str, Any]] | Sequence[Any],
                      width: int = 48) -> tuple[str, float, float]:
-    """Sparkline plus first and last best cost of a history.
+    """Sparkline plus first and last best-so-far cost of a history.
 
     Accepts either :class:`~qroute.algorithms.base.IterationRecord` objects or
     the plain dictionaries stored in ``rows.jsonl`` (whose key is ``"c"``).
+
+    The series is reduced to its running minimum before plotting. Population
+    metaheuristics already log a monotone incumbent, so for them this changes
+    nothing, but a local-search baseline such as OR-Tools guided local search
+    logs the *current* solution and deliberately accepts worse ones while it
+    escapes a local optimum. Plotting that series raw would end the curve above
+    the cost reported in the table beside it. The running minimum is the honest
+    reading of "convergence": the quality the operator would actually have in
+    hand had the search been stopped at that moment.
     """
     costs: list[float] = []
+    running = math.inf
     for h in history:
         if isinstance(h, Mapping):
             value = h.get("c", h.get("best_cost"))
         else:
             value = getattr(h, "best_cost", None)
-        if value is not None:
-            costs.append(float(value))
+        if value is None:
+            continue
+        value = float(value)
+        if math.isfinite(value):
+            running = min(running, value)
+        costs.append(running)
+    costs = [c for c in costs if math.isfinite(c)]
     if not costs:
         return "", float("nan"), float("nan")
     return sparkline(costs, width), costs[0], costs[-1]
@@ -379,10 +407,26 @@ def cell_table(summary: Mapping[str, Any]) -> Table:
             format_gap(gap.get("mean")), format_number(gap.get("std"), 3),
             format_number((cell.get("cost") or {}).get("median")),
             f"{cell['feasible_runs']}/{cell['runs']}",
-            str(cell.get("hit_bks", 0)),
+            _hit_bks_text(cell),
             format_seconds(cell.get("median_time_to_1pct")),
         )
     return table
+
+
+def _hit_bks_text(cell: Mapping[str, Any]) -> Text:
+    """The "hit best known" count, marked when the cell had an infeasible run.
+
+    The count itself is computed upstream from the gap alone, so a run that
+    reached a low cost by violating capacity or a time window is counted as a
+    hit. Rather than silently print a number that flatters the method, append a
+    marker whenever any run in the cell was infeasible, so the reader knows to
+    read the feasibility column before believing this one.
+    """
+    hits = int(cell.get("hit_bks", 0) or 0)
+    infeasible = int(cell.get("runs", 0)) - int(cell.get("feasible_runs", 0))
+    if hits and infeasible > 0:
+        return Text(f"{hits}!", style=GAP_SUSPECT_STYLE)
+    return Text(str(hits))
 
 
 def omnibus_table(omnibus: Mapping[str, Any]) -> Table:

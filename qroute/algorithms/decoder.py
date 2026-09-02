@@ -246,7 +246,7 @@ class Decoder:
                 self.pen_tw = saved[1] * (10.0 ** (k + 1))
                 self.pen_dur = saved[2] * (10.0 ** (k + 1))
                 improved, _ = self.improve_routes(best)
-                if improved:
+                if improved and self.instance.evaluate(improved).total_violation <= stats.total_violation + 1e-9:
                     best = improved
         finally:
             self.pen_cap, self.pen_tw, self.pen_dur = saved
@@ -285,8 +285,22 @@ class Decoder:
                     break
             if not placed:
                 keep.append([c])
-        improved, _ = self.improve_routes(keep)
-        return improved or keep
+
+        # ``keep`` is feasible by construction. Polishing it with local search is
+        # worth a few percent, but only under a penalty large enough that no
+        # routing saving can pay for re-creating an overload; under the ordinary
+        # weight the search happily merges two routes again and undoes the
+        # repair. The polished result is therefore accepted only if it is still
+        # feasible, so this step can improve the answer and never spoil it.
+        saved = self.pen_cap
+        try:
+            self.pen_cap = max(saved, 1.0) * 1e6
+            polished, _ = self.improve_routes(keep)
+        finally:
+            self.pen_cap = saved
+        if polished and self.instance.evaluate(polished).capacity_violation <= 1e-9:
+            return polished
+        return keep
 
     def _penalised_routes(self, routes) -> float:
         from qroute.core.types import routes_to_array

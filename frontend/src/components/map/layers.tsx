@@ -167,6 +167,7 @@ export function RouteLayer({ lines, dim }: { lines: RouteLine[]; dim: boolean })
       });
       path.bindTooltip(
         `Vehicle ${line.vehicle + 1} · ${line.stops.length} stops · ${fmtDistance(line.totalMetres)}` +
+          (line.seconds !== null ? ` · ${fmtDuration(line.seconds)}` : '') +
           (line.onRoad ? '' : ' (straight-line approximation)'),
         { sticky: true, direction: 'top' },
       );
@@ -236,13 +237,61 @@ export function VehicleLayer({ lines, running }: { lines: RouteLine[]; running: 
 
 // ------------------------------------------------------------- view control
 
-/** Fit the map to a bounding box whenever the box identity changes. */
+/**
+ * Fit the map to a bounding box whenever the box identity changes.
+ *
+ * The size guard matters more than it looks. Leaflet computes a fitting zoom
+ * from its cached container size, and when that size is still zero — which it
+ * is on the first effect pass, before the flex layout has settled — `fitBounds`
+ * silently returns `maxZoom` and the map opens at street level over a corner of
+ * the city. So the fit is skipped until the container genuinely has a size, and
+ * a resize observer retries once it does.
+ */
 export function FitBounds({ bounds }: { bounds: [LatLng, LatLng] | null }) {
   const map = useMap();
+
   useEffect(() => {
-    if (!bounds) return;
-    map.fitBounds(bounds, { padding: [40, 40], animate: true });
+    if (!bounds) return undefined;
+    let fitted = false;
+
+    const fit = () => {
+      map.invalidateSize({ animate: false, pan: false });
+      const size = map.getSize();
+      if (size.x < 2 || size.y < 2) return;
+      // Not animated: an interrupted zoom animation strands the map at an
+      // intermediate zoom that looks like a broken fit.
+      map.fitBounds(bounds, { padding: [40, 40], animate: false });
+      fitted = true;
+    };
+
+    fit();
+    if (fitted) return undefined;
+    const observer = new ResizeObserver(() => {
+      if (!fitted) fit();
+    });
+    observer.observe(map.getContainer());
+    return () => observer.disconnect();
   }, [bounds, map]);
+
+  return null;
+}
+
+/**
+ * Keep Leaflet's idea of the container size in step with the real one.
+ *
+ * Without this the map is drawn for the wrong viewport after the window is
+ * resized or a projector changes the resolution mid-demonstration: tiles do not
+ * fill the pane and clicks land on the wrong road.
+ */
+export function ResizeWatcher() {
+  const map = useMap();
+  useEffect(() => {
+    const observer = new ResizeObserver(() =>
+      map.invalidateSize({ animate: false, pan: false }),
+    );
+    observer.observe(map.getContainer());
+    return () => observer.disconnect();
+  }, [map]);
   return null;
 }
 

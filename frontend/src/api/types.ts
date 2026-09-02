@@ -297,6 +297,17 @@ export interface RunStatus {
   error: string | null;
   /** The complete history, so a page reload after a run still shows the curve. */
   history: RunTick[];
+  /**
+   * Set only on a re-optimisation: the previous plan's cost priced under the
+   * *new* travel-time matrices. It is the honest comparator for a re-solve —
+   * "what carrying on with the old routes would now cost" — so the improvement
+   * a traffic update buys can be stated rather than asserted.
+   */
+  baseline_cost: number | null;
+  /** The run this one was warm-started from, when it is a re-optimisation. */
+  parent_run_id: string | null;
+  /** Whether the previous plan actually seeded the search, or it started cold. */
+  warm_started: boolean;
 }
 
 // ----------------------------------------------------------------- benchmarks

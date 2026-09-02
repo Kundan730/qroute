@@ -205,6 +205,42 @@ class ApiState:
         self._benchmark_index_lock = threading.Lock()
 
         self.warmup: dict[str, Any] = {"done": False, "seconds": 0.0, "detail": "not started"}
+        self.solvers: dict[str, Any] = {
+            "ortools_available": False,
+            "pyvrp_available": False,
+            "pyvrp_version": None,
+            "probed": False,
+        }
+
+    # ------------------------------------------------------- capabilities
+    def probe_solvers(self) -> dict[str, Any]:
+        """Find out once which optional solvers are installed.
+
+        ``/api/health`` reports this, and the browser polls health while the
+        server is warming up. Probing on demand would mean the first poll pays
+        for importing PyVRP - measured at 3.7 seconds - inside a request that is
+        supposed to answer instantly, so the probe happens here, at startup, and
+        the endpoint only reads the answer.
+        """
+        ortools_ok = True
+        try:
+            import ortools  # noqa: F401
+        except Exception:  # pragma: no cover - ortools is a hard dependency
+            ortools_ok = False
+        try:
+            from qroute.baselines import pyvrp_hgs
+
+            pyvrp_ok = pyvrp_hgs.available()
+            pyvrp_version = pyvrp_hgs.version()
+        except Exception:  # pragma: no cover - defensive
+            pyvrp_ok, pyvrp_version = False, None
+        self.solvers = {
+            "ortools_available": ortools_ok,
+            "pyvrp_available": bool(pyvrp_ok),
+            "pyvrp_version": pyvrp_version,
+            "probed": True,
+        }
+        return self.solvers
 
     # ---------------------------------------------------------- networks
     @staticmethod
@@ -419,25 +455,29 @@ class ApiState:
         Reading all 138 files takes about 0.4 s, which is tolerable once and not
         per request.
         """
+        # The build happens *inside* the lock rather than beside it. Health is
+        # polled every couple of hundred milliseconds while the server warms up,
+        # and with the check and the build separated every poll that arrived
+        # before the first one finished would start its own build. One caller
+        # pays 0.4 s and the rest wait for that same answer.
         with self._benchmark_index_lock:
             if self._benchmark_index is not None:
                 return self._benchmark_index
 
-        from qroute.problems.loaders import list_instances, load
+            from qroute.problems.loaders import list_instances, load
 
-        rows: list[dict[str, Any]] = []
-        for family, names in list_instances().items():
-            for name in names:
-                try:
-                    inst = load(name)
-                except Exception:
-                    log.exception("could not read benchmark instance %s", name)
-                    continue
-                rows.append(instance_summary(inst, family))
-        rows.sort(key=lambda r: (r["family"], r["n_customers"], r["name"]))
-        with self._benchmark_index_lock:
+            rows: list[dict[str, Any]] = []
+            for family, names in list_instances().items():
+                for name in names:
+                    try:
+                        inst = load(name)
+                    except Exception:
+                        log.exception("could not read benchmark instance %s", name)
+                        continue
+                    rows.append(instance_summary(inst, family))
+            rows.sort(key=lambda r: (r["family"], r["n_customers"], r["name"]))
             self._benchmark_index = rows
-        return rows
+            return rows
 
     # ----------------------------------------------------------- warm-up
     def warm_up(self) -> dict[str, Any]:
@@ -479,14 +519,16 @@ class ApiState:
         """Warm up and preload without blocking the server from accepting requests."""
 
         def _work() -> None:
-            self.warm_up()
-            self.preload()
-            # Building the benchmark index here means the first /api/instances
-            # call is instant, which is usually the first thing the UI asks for.
+            self.probe_solvers()
+            # The benchmark index is built before the road networks, not after:
+            # it costs 0.4 s against their 28 s, and listing instances is what
+            # the UI asks for first.
             try:
                 self.benchmark_instances()
             except Exception:
                 log.exception("benchmark index build failed")
+            self.warm_up()
+            self.preload()
 
         thread = threading.Thread(target=_work, name="qroute-api-startup", daemon=True)
         thread.start()

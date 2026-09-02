@@ -34,6 +34,7 @@ export default function App() {
   const health = useAppStore((s) => s.health);
   const error = useAppStore((s) => s.error);
   const bootstrap = useAppStore((s) => s.bootstrap);
+  const recheck = useAppStore((s) => s.recheck);
   const streaming = useRunStore((s) => s.streaming);
 
   useEffect(() => {
@@ -47,6 +48,16 @@ export default function App() {
     const timer = window.setInterval(() => void bootstrap(), 4000);
     return () => window.clearInterval(timer);
   }, [backend, bootstrap]);
+
+  // And keep checking while it is up, so the badge tells the truth in the other
+  // direction too. A run in flight already holds an open stream that would
+  // report its own failure, and health is a cheap read of state already in
+  // memory, so ten seconds costs nothing and never blocks a solve.
+  useEffect(() => {
+    if (backend !== 'online') return undefined;
+    const timer = window.setInterval(() => void recheck(), 10000);
+    return () => window.clearInterval(timer);
+  }, [backend, recheck]);
 
   const statusTone =
     backend === 'online' ? 'var(--ok)' : backend === 'offline' ? 'var(--bad)' : 'var(--warn)';

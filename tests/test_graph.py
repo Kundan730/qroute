@@ -205,6 +205,33 @@ def test_astar_expands_no_more_nodes_than_dijkstra(network):
     assert total_a <= total_d
 
 
+def test_astar_stays_exact_when_edges_are_sped_up(network):
+    """A* must remain optimal after update_weights raises speeds above free flow.
+
+    A heuristic that divides by the free-flow speed table is inadmissible once
+    any edge moves faster than the table, and A* then returns paths that cost
+    tens of percent more than the optimum without any error being raised. The
+    heuristic constant therefore comes from the live travel times, and this test
+    pins that: Dijkstra is the ground truth because its correctness does not
+    depend on a heuristic at all.
+    """
+    rng = np.random.default_rng(5)
+    factors = rng.uniform(0.1, 0.4, size=network.n_edges)   # traffic faster than free flow
+    network.update_weights(factors=factors)
+    try:
+        assert network.max_speed_mps > network.edge_speed_kph.max() / 3.6
+        pairs = [(int(a), int(b)) for a, b in rng.choice(network.n_nodes, (12, 2)) if a != b]
+        assert pairs
+        for s, t in pairs:
+            d = paths.dijkstra(network, s, t)
+            a = paths.astar(network, s, t)
+            assert a.cost == pytest.approx(d.cost, rel=1e-9, abs=1e-9)
+    finally:
+        network.reset_weights()
+    # And the bound is back to the free-flow maximum once the weights are reset.
+    assert network.max_speed_mps == pytest.approx(network.edge_speed_kph.max() / 3.6, rel=1e-9)
+
+
 def test_astar_on_length_weight_matches_dijkstra(network):
     rng = np.random.default_rng(5)
     s, t = (int(x) for x in rng.choice(network.n_nodes, 2, replace=False))

@@ -184,18 +184,21 @@ def astar(
     """Goal-directed exact shortest path.
 
     The heuristic is the great-circle distance to the target, converted to a
-    time bound by dividing by the network's fastest free-flow speed when the
-    weight is travel time. Both forms are admissible - a road can only be
-    longer than the straight line, and no vehicle travels faster than the
-    fastest speed limit in the network - and both are consistent (the triangle
-    inequality holds for great-circle distance), so no node needs re-expansion
-    and the first time the target is popped its label is final.
+    time bound by dividing by :attr:`RoadNetwork.max_speed_mps` when the weight
+    is travel time. Both forms are admissible - a road can only be longer than
+    the straight line, and no arc of the network is traversed faster than the
+    fastest arc - and both are consistent (the triangle inequality holds for
+    great-circle distance), so no node needs re-expansion and the first time
+    the target is popped its label is final.
 
-    A caveat worth stating: if :meth:`RoadNetwork.update_weights` ever raised an
-    edge speed *above* the free-flow table, the time heuristic would stop being
-    admissible. Congestion only ever slows traffic down, so this does not occur
-    in practice; the assertion is documented rather than checked per call
-    because checking would cost more than the search saves.
+    The speed constant is taken from the *current* edge travel times, not from
+    the free-flow speed table. Those coincide at free flow, but a call to
+    :meth:`RoadNetwork.update_weights` with a factor below 1.0 speeds edges up
+    past the table, and a heuristic pinned to the table would then over-estimate
+    the remaining time and quietly return non-optimal paths. See
+    :attr:`RoadNetwork.max_speed_mps` for the measurement behind that choice;
+    ``tests/test_graph.py::test_astar_stays_exact_when_edges_are_sped_up`` is
+    the regression test.
     """
     indptr = network._indptr
     indices = network._indices

@@ -144,11 +144,14 @@ class AdaptivePenalty:
         self.floor = float(floor)
         self.ceiling = float(ceiling)
 
-        base = self._initial_capacity_penalty(instance)
+        base_cap = self._initial_capacity_penalty(instance)
+        base_sched = self._initial_schedule_penalty(instance)
         self._values: dict[str, float] = {
-            "capacity": self._clamp(capacity if capacity is not None else base),
-            "time_window": self._clamp(time_window if time_window is not None else 1.0),
-            "duration": self._clamp(duration if duration is not None else 1.0),
+            "capacity": self._clamp(capacity if capacity is not None else base_cap),
+            "time_window": self._clamp(
+                time_window if time_window is not None else base_sched),
+            "duration": self._clamp(
+                duration if duration is not None else base_sched),
         }
         self._initial: dict[str, float] = dict(self._values)
 
@@ -180,6 +183,36 @@ class AdaptivePenalty:
         from qroute.algorithms.decoder import Decoder
 
         return Decoder.default_capacity_penalty(instance)
+
+    @staticmethod
+    def _initial_schedule_penalty(instance: Instance | None) -> float:
+        """Starting weight for the time-window and duration constraints.
+
+        Both are violated in *time* units and are priced the same way the
+        decoder prices them when no controller is attached: one unit of lateness
+        costs about one long arc. The argument is the same one made for
+        capacity above, and it bites harder here. Time-window slack on a Solomon
+        instance is measured in hundreds of units while arcs cost tens, so a
+        neutral weight of 1.0 is not a weak penalty, it is no penalty at all:
+        every decoded candidate comes back late, the measured feasible fraction
+        sticks at zero, and the controller spends its whole budget multiplying a
+        weight that started two orders of magnitude too small. That was measured
+        on R101, where a hard-coded start of 1.0 left all 800 sampled decodes
+        time-window infeasible and the weight still only at 4.3 by the end,
+        against a decoder default of 91.8.
+
+        Unlike the capacity rule this one cannot be delegated: ``Decoder``
+        computes it inline in ``__init__`` rather than exposing a static
+        accessor, and ``Decoder`` belongs to another module. The rule is
+        therefore mirrored here, and this comment is the warning that the two
+        have to be changed together.
+        """
+        if instance is None:
+            return 1.0
+        max_cost = float(np.max(instance.cost_matrix))
+        if not np.isfinite(max_cost):
+            return 1.0
+        return max(1.0, max_cost)
 
     def _clamp(self, value: float) -> float:
         return float(min(max(float(value), self.floor), self.ceiling))

@@ -58,15 +58,21 @@ one and runs considerably faster, because the rotation update is a weak,
 positionally-independent learning signal.
 
 What was actually measured here, on this machine, equal 20-second wall-clock
-budget, 3 seeds, mean gap to best-known (runs executed serially):
+budget, 3 seeds, mean gap to best-known, runs executed serially. All three
+algorithms faced identical conditions, but the machine was not otherwise idle,
+so the whole protocol was repeated three times; the range over those repeats is
+given rather than a single column, because the generation counts moved by up to
+a factor of two between them:
 
-    ===========  ======  ======  ====================
-    instance     QPSO    QIEA    QuantumRotationKeys
-    ===========  ======  ======  ====================
-    A-n32-k5     0.00%   0.00%   0.00%
-    A-n45-k7     0.52%   0.00%   0.00%
-    A-n80-k10    2.36%   0.51%   0.98%
-    ===========  ======  ======  ====================
+    ===========  =============  =============  ====================
+    instance     QPSO           QIEA           QuantumRotationKeys
+    ===========  =============  =============  ====================
+    A-n32-k5     0.00%          0.00%          0.00%
+    A-n45-k7     0.52 - 0.76%   0.00%          0.00%
+    A-n80-k10    2.31 - 2.36%   0.19 - 0.51%   0.62 - 0.98%
+    ===========  =============  =============  ====================
+
+The ordering is stable across all three repeats even though the values are not.
 
 So on this benchmark both rotation-gate engines beat the project's QPSO, which
 is not the result the literature above would predict. Three caveats keep that
@@ -278,12 +284,23 @@ class _RotationOptimizer(Optimizer):
             self.evaluations += P
 
             g = int(np.argmin(best_cost))
-            self.offer(Solution([list(r) for r in best_routes[g]], float(best_cost[g])))
+            incumbent = [list(r) for r in best_routes[g]]
+            self.offer(Solution(incumbent, float(best_cost[g])))
 
             self._migrate(it, best_bits, best_cost, best_routes)
 
+            # The history's diversity column carries mean register entropy in
+            # bits, which is the QIEA analogue of swarm spread: 1.0 means the
+            # population is still undecided everywhere, 0.0 that it has
+            # collapsed onto one string and only H-epsilon is still exploring.
             entropy = float(np.mean([r.entropy() for r in regs]))
-            self.record(it, float(best_cost[g]), float(costs.mean()), entropy, True)
+            # The search minimises a *penalised* cost, so a cheap-looking
+            # incumbent can still be infeasible. Re-scoring the incumbent with
+            # the reference evaluator (once per generation, not once per
+            # individual) keeps the convergence log from claiming feasibility it
+            # has not checked.
+            feasible = self.instance.evaluate(incumbent).is_feasible if incumbent else False
+            self.record(it, float(best_cost[g]), float(costs.mean()), entropy, feasible)
         return it
 
     def _migrate(self, iteration: int, best_bits, best_cost, best_routes) -> None:
@@ -472,28 +489,40 @@ class QuantumRotationKeys(_RotationOptimizer):
       pressure that carries no fitness signal, and the effective search is
       diluted across ``n * b`` variables instead of ``n``.
 
-    Measured on this machine, 10-second budget, population 20, 3 seeds, mean gap
-    to best-known:
+    Measured twice on this machine, 10-second budget, population 20, 3 seeds,
+    mean gap to best-known on A-n80-k10. The two sweeps ran under different
+    machine load, which is exactly why both are shown - a single tidy column
+    would overstate how much of this is signal:
 
-    ========  ==========  ===========
-    ``bits``  A-n45-k7    A-n80-k10
-    ========  ==========  ===========
-    4         0.00%       1.72%
-    6         0.00%       1.27%
-    8         0.00%       1.15%
-    10        0.00%       0.91%
-    12        0.00%       1.06%
-    14        0.00%       0.34%
-    16        0.00%       0.68%
-    ========  ==========  ===========
+    ========  =========  =========
+    ``bits``  sweep 1    sweep 2
+    ========  =========  =========
+    4         1.72%      2.70%
+    6         1.27%      1.34%
+    8         1.15%      1.36%
+    10        0.91%      1.04%
+    12        1.06%      1.30%
+    14        0.34%      2.34%
+    16        0.68%      1.76%
+    ========  =========  =========
 
-    So the collision argument is real - 4 bits gives 16 levels for 79 customers
-    and is clearly the worst setting - but it is much gentler than the birthday
+    A-n45-k7 is not tabulated because every depth solved it to best-known in
+    both sweeps; it is too easy to separate the settings.
+
+    Two conclusions survive both sweeps and one does not.
+
+    * The collision argument is real at the bottom: 4 bits gives 16 levels for
+      79 customers and is the worst setting in both runs, by a clear margin.
+    * ``b = 10`` is consistently good (0.91%, 1.04%).
+    * The apparent excellence of 14 bits in sweep 1 does **not** replicate
+      (0.34% against 2.34%). Above about 8 bits the differences are inside the
+      run-to-run spread and must not be read as a ranking.
+
+    Note also that the penalty for collisions is far gentler than the birthday
     bound alone suggests, because local search repairs most of the damage a tied
-    ordering does. Above 10 bits the differences are inside the spread across
-    seeds (the 14-bit row ranged from 0.06% to 0.79%) and should not be read as
-    a ranking. ``b = 10`` (1024 levels) is the default: past the region where
-    depth demonstrably hurts, and cheap at ten qubits per customer.
+    ordering does before the cost is measured. ``b = 10`` (1024 levels) is the
+    default: past the region where depth demonstrably hurts, and cheap at ten
+    qubits per customer.
 
     Note also that a key's *value* has no meaning of its own - only the induced
     ordering does - yet the genotype is positional. Two orderings that differ by

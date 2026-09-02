@@ -289,9 +289,12 @@ def time_to_target(rows: Sequence[Mapping[str, Any]], out_dir: str | Path,
 
     Runs that never reached the target are kept in the sample as infinite times,
     following Aiex, Resende and Ribeiro, so a curve that ends at 0.6 means forty
-    percent of runs failed rather than that the data ran out.
+    percent of runs failed rather than that the data ran out. Runs for which the
+    target cannot be evaluated at all -- an instance with no best known cost --
+    are a different thing entirely and are left out of the sample rather than
+    counted as failures, which would push every curve down for free.
     """
-    from qroute.benchmark.report import first_within
+    from qroute.benchmark.report import target_status
 
     good = ok_rows(rows)
     if instance is not None:
@@ -304,12 +307,21 @@ def time_to_target(rows: Sequence[Mapping[str, Any]], out_dir: str | Path,
     with plt.rc_context(_RC):
         fig, ax = plt.subplots(figsize=(7.0, 4.2))
         plotted = False
+        unmeasurable: dict[str, int] = {}
         for algo in algos:
             rs = [r for r in good if str(r["algorithm"]) == algo]
             times = []
+            skipped = 0
             for r in rs:
-                _, t = first_within(r, pct)
-                times.append(float(t) if t is not None else math.inf)
+                status, _, t = target_status(r, pct)
+                if status == "unknown":
+                    skipped += 1
+                elif status == "reached" and t is not None:
+                    times.append(float(t))
+                else:
+                    times.append(math.inf)
+            if skipped:
+                unmeasurable[algo] = skipped
             if not times:
                 continue
             t_sorted, probs = time_to_target_curve(times)
@@ -335,6 +347,13 @@ def time_to_target(rows: Sequence[Mapping[str, Any]], out_dir: str | Path,
         ax.set_ylabel("empirical probability")
         scope = instance if instance else "all instances"
         ax.set_title(f"Time to reach within {pct:g}% of the best known cost ({scope})")
+        if unmeasurable:
+            total = sum(unmeasurable.values())
+            ax.text(0.99, 0.02,
+                    f"{total} run(s) excluded: the target cannot be evaluated without a "
+                    f"best known cost",
+                    transform=ax.transAxes, ha="right", va="bottom",
+                    fontsize=8, color="0.35")
         # The curves rise to the right, so the upper left is always clear.
         ax.legend(loc="upper left")
         stem = f"time_to_target_{pct:g}pct" + (f"_{_safe(instance)}" if instance else "")

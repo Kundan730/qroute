@@ -284,11 +284,28 @@ def test_report_csv_has_one_line_per_run(swept: Path, tmp_path: Path):
 
 
 def test_report_plots_are_written(swept: Path):
+    """Figures come from qroute.benchmark.plots when it is present, ours otherwise.
+
+    The two providers name their files differently, so the test asserts what
+    both guarantee: real PNG files land in the figures directory and the command
+    says where they went.
+    """
     result = invoke("report", str(swept), "--plots")
     assert result.exit_code == 0, result.output
     figures = swept / "figures"
-    assert (figures / "convergence.png").exists()
-    assert (figures / "gap_distribution.png").stat().st_size > 1000
+    written = list(figures.glob("*.png"))
+    assert written, result.output
+    assert all(p.stat().st_size > 1000 for p in written)
+    assert any(p.name.startswith("convergence") for p in written)
+    assert any("gap" in p.name for p in written)
+
+
+def test_report_markdown_without_an_output_file_writes_the_report(swept: Path):
+    pytest.importorskip("qroute.benchmark.report")
+    result = invoke("report", str(swept), "--format", "markdown")
+    assert result.exit_code == 0, result.output
+    assert (swept / "report.md").exists()
+    assert "|" in result.output
 
 
 def test_report_rejects_an_unknown_format(swept: Path):
@@ -299,24 +316,41 @@ def test_report_rejects_a_directory_without_results(tmp_path: Path):
     assert invoke("report", str(tmp_path)).exit_code == 1
 
 
+def _row(instance: str, algorithm: str, cost: float, gap: float | None) -> dict:
+    return {"instance": instance, "algorithm": algorithm, "seed": 1, "cost": cost,
+            "gap": gap, "bks": 1000.0, "n_routes": 10, "feasible": True,
+            "violation": 0.0, "iterations": 10, "evaluations": 100,
+            "seconds": 3.0, "status": "ok"}
+
+
 def test_summarise_survives_a_run_that_found_no_solution():
-    """The runner's own summariser raises on an infinite cost; ours must not."""
+    """A run that returns an infinite cost must not destroy a finished sweep.
+
+    This is not hypothetical: OR-Tools on a three-second budget finds no
+    feasible solution at all for R101, RC101 and RC105, its cost comes back as
+    infinity, and the gap block for that cell collapses to ``{"n": 0}``.
+    ``BenchmarkRunner.summarise`` then raises ``KeyError: 'median'`` while
+    building the omnibus test, after every run has already been paid for. The
+    CLI falls back to a reduced summary instead of losing the sweep.
+    """
+    from qroute.benchmark.runner import BenchmarkRunner
     from qroute.cli.main import _summarise
 
-    rows = [
-        {"instance": "R101", "algorithm": "ortools", "seed": 1, "cost": float("inf"),
-         "gap": float("inf"), "bks": 1637.7, "n_routes": 0, "feasible": True,
-         "iterations": 1, "evaluations": 0, "seconds": 3.0, "status": "ok"},
-        {"instance": "R101", "algorithm": "qpso", "seed": 1, "cost": 1700.0,
-         "gap": 3.8, "bks": 1637.7, "n_routes": 19, "feasible": True,
-         "iterations": 10, "evaluations": 100, "seconds": 3.0, "status": "ok"},
-    ]
+    rows = [_row(inst, algo, 1040.0, 4.0)
+            for inst in ("R101", "R104", "R107")
+            for algo in ("qpso", "ga", "ortools")]
+    rows[2] = _row("R101", "ortools", float("inf"), float("inf"))
+
+    with pytest.raises(KeyError):
+        BenchmarkRunner.summarise(rows)
+
     summary = _summarise(rows)
     assert summary["degraded"] is True
     assert summary["cells"]["R101|ortools"]["gap"] is None
-    assert summary["cells"]["R101|qpso"]["gap"]["median"] == pytest.approx(3.8)
+    assert summary["cells"]["R101|qpso"]["gap"]["median"] == pytest.approx(4.0)
     assert summary["omnibus"] is None
-    # And it must still render without raising.
+    assert summary["n_ok"] == 9
+    # And the reduced summary must still render without raising.
     render.summary_table(summary)
     render.cell_table(summary)
     assert "R101" in render.markdown_report(summary)
@@ -460,6 +494,23 @@ def test_gap_style_bands_are_ordered_from_good_to_bad():
     assert render.gap_style(20.0) == render.GAP_WORST_STYLE
     assert render.gap_style(None) == "dim"
     assert render.gap_style(float("nan")) == "dim"
+    # Floating-point residue on a matched optimum is still a match, not a record.
+    assert render.gap_style(-1e-14) == "bold bright_green"
+
+
+def test_a_cost_below_the_best_known_is_flagged_not_celebrated():
+    """Beating a long-standing published optimum means "check feasibility"."""
+    assert render.gap_style(-3.0) == render.GAP_SUSPECT_STYLE
+    assert render.GAP_SUSPECT_STYLE != "bold bright_green"
+
+
+def test_hit_bks_is_marked_when_a_run_in_the_cell_was_infeasible():
+    clean = {"runs": 2, "feasible_runs": 2, "hit_bks": 1}
+    tainted = {"runs": 2, "feasible_runs": 1, "hit_bks": 1}
+    assert str(render._hit_bks_text(clean)) == "1"
+    assert str(render._hit_bks_text(tainted)) == "1!"
+    # A cell that hit nothing needs no marker even if a run was infeasible.
+    assert str(render._hit_bks_text({"runs": 2, "feasible_runs": 1, "hit_bks": 0})) == "0"
 
 
 def test_format_gap_and_numbers_never_print_nan():
@@ -492,6 +543,22 @@ def test_convergence_line_accepts_stored_history_dictionaries():
     line, first, last = render.convergence_line(history)
     assert len(line) == 2
     assert (first, last) == (10.0, 9.0)
+
+
+def test_convergence_line_plots_the_running_minimum():
+    """A curve labelled "convergence" must not end above the reported cost.
+
+    OR-Tools guided local search logs the solution it currently holds, and it
+    deliberately accepts worse ones to escape a local optimum, so the raw series
+    rises again at the end. The rendered curve has to show the best found so
+    far, whose last value is the cost the result table prints beside it.
+    """
+    history = [{"c": 100.0}, {"c": 80.0}, {"c": 95.0}, {"c": 90.0}]
+    line, first, last = render.convergence_line(history)
+    assert (first, last) == (100.0, 80.0)
+    # Monotone non-increasing series render as non-increasing blocks.
+    heights = [render.BLOCKS.index(ch) for ch in line]
+    assert heights == sorted(heights, reverse=True)
 
 
 def test_csv_rows_keeps_the_documented_columns():

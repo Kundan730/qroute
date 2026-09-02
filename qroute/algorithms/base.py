@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ import numpy as np
 from qroute.core.rng import make_rng
 from qroute.core.types import Solution
 from qroute.problems.instance import Instance
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -152,6 +155,7 @@ class Optimizer(ABC):
         self.callback = callback
         self.params = params
         self.history: list[IterationRecord] = []
+        self.repair_note: str | None = None
         self.evaluations = 0
         self._t0 = 0.0
         self._best: Solution = Solution()
@@ -182,9 +186,16 @@ class Optimizer(ABC):
                     # solution is usually dearer, and that is the honest trade.
                     if after < before - 1e-9:
                         self._best = candidate
-                except Exception:
-                    # A failed repair must never lose the solution we already had.
-                    pass
+                    elif after > 1e-9:
+                        self.repair_note = (
+                            f"repair could not remove all violation: {before:.4g} -> {after:.4g}")
+                except Exception as exc:
+                    # A failed repair must never lose the solution we already
+                    # had, but it must not be invisible either: a silently
+                    # swallowed failure here would show up much later as an
+                    # infeasible solution reported with a flattering cost.
+                    self.repair_note = f"repair raised {type(exc).__name__}: {exc}"
+                    logger.warning("repair failed on %s: %s", self.instance.name, exc)
         elapsed = time.perf_counter() - self._t0
         best = self._best
         if best.routes:

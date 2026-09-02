@@ -63,6 +63,7 @@ class HealthResponse(BaseModel):
     active_runs: int = 0
     worker_start_method: Optional[str] = None
     workers_primed: bool = False
+    worker_prime_seconds: Optional[float] = None
 
 
 ParamKind = Literal["int", "float", "bool", "choice", "text"]
@@ -86,6 +87,10 @@ class AlgorithmInfo(BaseModel):
     description: str
     kind: Literal["metaheuristic", "baseline", "exact", "reference"] = "metaheuristic"
     supports_warm_start: bool = False
+    #: ``None`` when installation is not in question; ``False`` for an optional
+    #: dependency that is not present, so the UI can grey the entry out instead
+    #: of offering a run that will fail.
+    available: Optional[bool] = None
     params: list[ParamSpec] = Field(default_factory=list)
 
 

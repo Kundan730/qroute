@@ -23,6 +23,8 @@ export interface RouteLine {
   totalMetres: number;
   /** False when the line is a straight-line fallback rather than a road path. */
   onRoad: boolean;
+  /** Backend-measured drive time for this leg, when it supplied one. */
+  seconds: number | null;
   /** Customer indices served, in order, for the route table. */
   stops: number[];
 }
@@ -73,6 +75,7 @@ export function buildRouteLines(
           cumulative,
           totalMetres: feature.properties.length_m ?? total,
           onRoad: true,
+          seconds: feature.properties.travel_time_s ?? null,
           stops: stopsByVehicle[feature.properties.vehicle] ?? [],
         };
       })
@@ -85,7 +88,15 @@ export function buildRouteLines(
     .map((stops, vehicle) => {
       const points: LatLng[] = [coords[0], ...stops.map((c) => coords[c]).filter(Boolean), coords[0]];
       const { cumulative, total } = withCumulative(points);
-      return { vehicle, points, cumulative, totalMetres: total, onRoad: false, stops };
+      return {
+        vehicle,
+        points,
+        cumulative,
+        totalMetres: total,
+        onRoad: false,
+        seconds: null,
+        stops,
+      };
     })
     .filter((line) => line.points.length >= 2);
 }

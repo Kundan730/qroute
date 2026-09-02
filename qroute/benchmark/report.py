@@ -337,10 +337,17 @@ def main_results_table(rows: Sequence[Mapping[str, Any]],
     ``summary`` is accepted for symmetry with the rest of the reporting API and
     is used only for the algorithm ordering when present; every number is
     recomputed from ``rows`` so the table cannot drift from the raw evidence.
+    An algorithm that appears in the rows but not in ``summary`` is appended
+    rather than dropped, because a caller's ordering preference must not be
+    able to make a result disappear from the table.
     """
     good = ok_rows(rows)
-    algos = list(summary.get("algorithms")) if summary and summary.get("algorithms") \
-        else algorithms_in(good or rows)
+    present = algorithms_in(good or rows)
+    if summary and summary.get("algorithms"):
+        preferred = [a for a in summary["algorithms"] if a in present]
+        algos = preferred + [a for a in present if a not in preferred]
+    else:
+        algos = present
     insts = instances_in(good or rows)
     by = group(good, "instance", "algorithm")
 
@@ -410,6 +417,7 @@ def tier_summary_table(rows: Sequence[Mapping[str, Any]],
                  "Runs at best known", "Mean seconds"],
         align=["l", "l", "r", "r", "r", "r", "r"],
     )
+    ungapped = 0
     for tier in order:
         tier_rows = [r for r in good if r["_tier"] == tier]
         if not tier_rows:
@@ -421,17 +429,28 @@ def tier_summary_table(rows: Sequence[Mapping[str, Any]],
                 continue
             gaps = _values(rs, "gap")
             hits = sum(1 for g in gaps if g <= 1e-9)
+            ungapped += len(rs) - len(gaps)
             table.rows.append([
                 tier, algo, fmt_int(n_inst), fmt_int(len(rs)),
                 fmt_gap(_mean(gaps)),
-                _fraction(hits, len(rs)) if gaps else EM_DASH,
+                # Denominator is the runs that could be scored against a best
+                # known cost, not every run in the tier: printing 0/8 next to a
+                # mean taken over 4 runs would overstate the evidence.
+                _fraction(hits, len(gaps)) if gaps else EM_DASH,
                 fmt_seconds(_mean(_values(rs, "seconds"))),
             ])
     table.notes.append(
         "Tier boundaries are on node count: " +
         ", ".join(f"{label}" for label, _, _ in TIERS) + ". "
-        "\"Runs at best known\" counts runs whose final cost equalled the best known cost."
+        "\"Runs at best known\" counts runs whose final cost equalled the best known cost, "
+        "over the runs that have a best known cost to compare against."
     )
+    if ungapped:
+        table.notes.append(
+            f"{ungapped} of the runs counted in \"Runs\" are on instances with no best known "
+            f"cost; they contribute to the run count and the mean time but not to the gap "
+            f"columns, whose denominator is the smaller number in \"Runs at best known\"."
+        )
     return table
 
 
@@ -477,6 +496,12 @@ def statistical_table(rows: Sequence[Mapping[str, Any]],
         columns=["Algorithm", "Mean rank", "Holm-corrected p vs control", "Effect size", "Finding"],
         align=["l", "r", "r", "r", "l"],
     )
+
+    if control is not None and control not in algos:
+        raise ValueError(
+            f"control algorithm {control!r} did not produce any completed run; "
+            f"the run contains {', '.join(algos) or 'no algorithms'}"
+        )
 
     if len(algos) < 3 or len(used) < 3:
         table.notes.append(
@@ -530,14 +555,30 @@ def statistical_table(rows: Sequence[Mapping[str, Any]],
 # ---------------------------------------------------------------------------
 # 4. Convergence table
 # ---------------------------------------------------------------------------
-def first_within(row: Mapping[str, Any], pct: float) -> tuple[int | None, float | None]:
-    """Iteration and elapsed time at which a run first came within ``pct``% of
-    the best known cost, or ``(None, None)`` if it never did.
+def target_status(row: Mapping[str, Any],
+                  pct: float) -> tuple[str, int | None, float | None]:
+    """Whether a run reached within ``pct``% of the best known cost, and when.
 
-    Computed from the recorded history when the run saved one, which is what
-    makes an arbitrary target percentage possible; otherwise the runner's own
-    precomputed 1% and 2% fields are used, and if neither is available the run
-    counts as "not reached" rather than being dropped.
+    Returns ``(status, iteration, seconds)`` where ``status`` is one of:
+
+    ``"reached"``
+        The run came within the target; the iteration and elapsed time are the
+        first point at which it did.
+    ``"not reached"``
+        The evidence needed to answer the question is present -- a best known
+        cost and a full history, or the runner's own precomputed field for this
+        target -- and it says the run never got there. This is a result.
+    ``"unknown"``
+        The question cannot be answered from this row at all: there is no best
+        known cost to measure against, or no history was saved and the runner
+        recorded nothing for this particular target. Reporting such a run as a
+        failure would invent a negative result, so it is counted separately and
+        printed as an em dash.
+
+    Splitting these three apart is the whole point of this function. The two
+    latter cases look identical if you only return "no time", and conflating
+    them lets a table claim ``0/5 runs reached`` about runs that were never
+    measured.
     """
     bks = row.get("bks")
     history = row.get("history") or []
@@ -545,13 +586,31 @@ def first_within(row: Mapping[str, Any], pct: float) -> tuple[int | None, float 
         threshold = float(bks) * (1.0 + pct / 100.0)
         for h in history:
             if float(h["c"]) <= threshold:
-                return int(h["i"]), float(h["t"])
-        return None, None
-    key_t = f"time_to_{int(pct)}pct" if float(pct).is_integer() else None
-    key_i = f"iters_to_{int(pct)}pct" if float(pct).is_integer() else None
-    t = row.get(key_t) if key_t else None
-    i = row.get(key_i) if key_i else None
-    return (int(i) if i is not None else None, float(t) if t is not None else None)
+                return "reached", int(h["i"]), float(h["t"])
+        return "not reached", None, None
+    if not bks:
+        # Without a reference cost "within 1% of the best known" has no meaning
+        # for this run, whatever else the row contains.
+        return "unknown", None, None
+    if not float(pct).is_integer():
+        return "unknown", None, None
+    t = row.get(f"time_to_{int(pct)}pct")
+    i = row.get(f"iters_to_{int(pct)}pct")
+    if t is None and i is None and f"time_to_{int(pct)}pct" not in row:
+        return "unknown", None, None
+    if t is None and i is None:
+        return "not reached", None, None
+    return "reached", (int(i) if i is not None else None), (float(t) if t is not None else None)
+
+
+def first_within(row: Mapping[str, Any], pct: float) -> tuple[int | None, float | None]:
+    """Iteration and elapsed time at which a run first came within ``pct``% of
+    the best known cost, or ``(None, None)`` if it never did or could not be
+    measured. :func:`target_status` distinguishes those last two cases and is
+    what the tables and figures actually use.
+    """
+    _status, i, t = target_status(row, pct)
+    return i, t
 
 
 def convergence_table(rows: Sequence[Mapping[str, Any]],
@@ -564,7 +623,10 @@ def convergence_table(rows: Sequence[Mapping[str, Any]],
     Medians are taken over the runs that actually reached the target, and the
     number that did is printed beside them. A cell reading "not reached" means
     no run of that algorithm on that instance ever got there within the budget,
-    which is a result, not a gap in the data.
+    which is a result, not a gap in the data. A cell reading em dash means the
+    opposite: the question could not be asked of those runs at all -- typically
+    because the instance has no best known cost -- and the count column then
+    says how many runs were measurable.
     """
     good = ok_rows(rows)
     algos = algorithms_in(good)
@@ -579,6 +641,7 @@ def convergence_table(rows: Sequence[Mapping[str, Any]],
     table = Table(title=title, columns=columns, align=align)
 
     any_history = any(r.get("history") for r in good)
+    unmeasurable = 0
     for inst in insts:
         for algo in algos:
             rs = by.get((inst, algo), [])
@@ -586,23 +649,37 @@ def convergence_table(rows: Sequence[Mapping[str, Any]],
                 continue
             cells = [inst, algo]
             for pct in targets:
-                hits = [first_within(r, pct) for r in rs]
-                iters = [i for i, _ in hits if i is not None]
-                secs = [t for _, t in hits if t is not None]
-                reached = sum(1 for i, t in hits if i is not None or t is not None)
-                if reached == 0:
-                    cells += ["not reached", "not reached", _fraction(0, len(rs))]
+                hits = [target_status(r, pct) for r in rs]
+                measured = [h for h in hits if h[0] != "unknown"]
+                unmeasurable += len(hits) - len(measured)
+                iters = [i for s, i, _ in measured if s == "reached" and i is not None]
+                secs = [t for s, _, t in measured if s == "reached" and t is not None]
+                reached = sum(1 for s, _, _ in measured if s == "reached")
+                if not measured:
+                    # Not one run of this cell could be measured against the
+                    # target, so the honest cell is an em dash and a 0/0 count,
+                    # never "not reached".
+                    cells += [EM_DASH, EM_DASH, _fraction(0, 0)]
+                elif reached == 0:
+                    cells += ["not reached", "not reached", _fraction(0, len(measured))]
                 else:
                     cells += [fmt_int(_median(iters)) if iters else EM_DASH,
                               fmt_seconds(_median(secs)) if secs else EM_DASH,
-                              _fraction(reached, len(rs))]
+                              _fraction(reached, len(measured))]
             table.rows.append(cells)
 
     table.notes.append(
         "Medians are over the runs that reached the target; the last column of each block "
-        "gives how many of the seeds did. \"not reached\" means no seed reached that target "
-        "within the time budget."
+        "gives how many of the measurable seeds did. \"not reached\" means no seed reached "
+        "that target within the time budget, which is a result; an em dash with a k/0 count "
+        "means the target could not be evaluated for those runs at all."
     )
+    if unmeasurable:
+        table.notes.append(
+            f"{unmeasurable} run-target pair(s) could not be evaluated -- the instance has no "
+            f"best known cost, or no history and no precomputed field for that target -- and "
+            f"are excluded from the counts rather than recorded as failures."
+        )
     if not any_history:
         table.notes.append(
             "No convergence history was saved with this run, so these figures come from the "
@@ -669,7 +746,10 @@ def ablation_table(rows: Sequence[Mapping[str, Any]],
         elif arm == reference:
             delta = EM_DASH
         else:
-            delta = f"{mean_gap - ref_gap:+.2f}"
+            # Subtract the numbers this table prints, not the unrounded ones.
+            # With the raw values a reader who checks 1.36 - 1.23 against a
+            # printed "+0.12" finds the table contradicting itself.
+            delta = f"{round(mean_gap, 2) - round(ref_gap, 2):+.2f}"
         hits = sum(1 for g in gaps if g <= 1e-9)
         table.rows.append([
             arm, label_map.get(arm, EM_DASH), fmt_int(len(common)), fmt_int(len(rs)),
@@ -801,9 +881,15 @@ def _preamble(rows: Sequence[Mapping[str, Any]],
     if bad:
         lines.append("Failures:")
         lines.append("")
-        for r in bad[:20]:
+        shown = bad[:20]
+        for r in shown:
             lines.append(f"* `{r.get('instance')}` / `{r.get('algorithm')}` "
                          f"seed {r.get('seed')}: {r.get('error')}")
+        if len(bad) > len(shown):
+            # Say that the list was cut rather than letting it end quietly at
+            # twenty and read as the complete tally.
+            lines.append(f"* ... and {len(bad) - len(shown)} further failures, listed in "
+                         f"full in `rows.jsonl`.")
         lines.append("")
     return lines
 

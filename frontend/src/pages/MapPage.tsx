@@ -21,13 +21,23 @@ import {
   EdgeLayer,
   ExactRouteLayer,
   FitBounds,
+  ResizeWatcher,
   RouteLayer,
   StopsLayer,
   VehicleLayer,
 } from '../components/map/layers';
 import { Badge, CheckLine, Field, KeyValue, Notice, RailSection, Stat, StatGrid } from '../components/ui';
 import { congestionBand } from '../lib/colors';
-import { dayName, fmt, fmtClock, fmtDistance, fmtDuration, fmtInt, fmtSeconds } from '../lib/format';
+import {
+  dayName,
+  fmt,
+  fmtClock,
+  fmtDistance,
+  fmtDuration,
+  fmtInt,
+  fmtPercent,
+  fmtSeconds,
+} from '../lib/format';
 import { useAppStore } from '../store/appStore';
 import { DETAIL_LEVELS, useMapStore } from '../store/mapStore';
 import { useRunStore } from '../store/runStore';
@@ -383,6 +393,7 @@ export function MapPage() {
           <VehicleLayer lines={lines} running={map.animate && !run.streaming} />
           <ExactRouteLayer route={map.exactRoute} />
           <FitBounds bounds={stopBounds ?? networkBounds} />
+          <ResizeWatcher />
         </MapContainer>
         <Legend
           congestion={traffic?.congestion ?? null}
@@ -529,7 +540,39 @@ export function MapPage() {
               </Badge>{' '}
               <Badge>{fmtInt(run.status.iterations)} iterations</Badge>{' '}
               <Badge>{fmtSeconds(run.status.seconds)}</Badge>
+              {run.status.warm_started && <> <Badge>warm started</Badge></>}
             </div>
+            {/*
+              A re-optimisation is only worth anything if it beats carrying on
+              with the plan already being driven. The backend prices that old
+              plan under the new matrices, so the comparison is stated here
+              rather than left for the viewer to assume - including when the
+              re-solve found nothing better, which is a real outcome when the
+              incident missed the routes.
+            */}
+            {run.status.baseline_cost !== null && (
+              <div className="note" style={{ marginTop: 8 }}>
+                {(() => {
+                  const before = run.status.baseline_cost;
+                  const after = run.status.best_cost ?? before;
+                  const saved = before - after;
+                  const pct = before > 0 ? (100 * saved) / before : 0;
+                  const same = Math.abs(saved) < 1e-6;
+                  return (
+                    <>
+                      Previous plan under the current traffic:{' '}
+                      <strong>{fmt(before, 1)}</strong>; this re-solve:{' '}
+                      <strong>{fmt(after, 1)}</strong>.{' '}
+                      {same
+                        ? 'No improvement - the incidents in force do not touch these routes.'
+                        : saved > 0
+                          ? `Re-routing saves ${fmt(saved, 1)} (${fmtPercent(pct, 2)}).`
+                          : `The re-solve is ${fmt(-saved, 1)} worse; the previous plan is still the one to drive.`}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
           </RailSection>
         )}
 

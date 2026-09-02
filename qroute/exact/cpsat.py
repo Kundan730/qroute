@@ -153,15 +153,23 @@ class _SolutionRecorder(cp_model.CpSolverSolutionCallback):
         self._scaling = scaling
         self._t0 = t0
         self.curve: list[tuple[float, float, float]] = []
+        self.failures = 0
 
     def on_solution_callback(self) -> None:  # pragma: no cover - solver driven
-        self.curve.append(
-            (
-                time.perf_counter() - self._t0,
-                self._scaling.to_float(self.objective_value),
-                self._scaling.to_float(self.best_objective_bound),
+        # An exception raised inside a CP-SAT callback aborts the search, which
+        # would silently cut a run short of its time limit and yield a weaker
+        # bound than the caller asked for. Recording the curve is a convenience;
+        # it must never be able to damage the solve.
+        try:
+            self.curve.append(
+                (
+                    time.perf_counter() - self._t0,
+                    self._scaling.to_float(self.objective_value),
+                    self._scaling.to_float(self.best_objective_bound),
+                )
             )
-        )
+        except Exception:
+            self.failures += 1
 
 
 _STATUS_NAMES = {
@@ -197,9 +205,18 @@ def solve_cvrp_cpsat(
     max_vehicles:
         Upper bound on the number of routes. ``None`` means the instance's own
         fleet limit if it has one, otherwise the number of customers, i.e. an
-        unrestricted fleet. Do not lower this to the reference ``k`` value when
-        you intend to claim a proof: capping the fleet at the best-known route
-        count assumes part of the answer.
+        unrestricted fleet.
+
+        This choice changes the problem, so it changes the answer. Capping the
+        fleet at the best-known route count assumes part of the answer and must
+        not be done when claiming a proof. But the converse also bites: several
+        CVRPLIB best-known values are optima *subject to exactly ``k``
+        vehicles*, and the unrestricted-fleet optimum can be strictly cheaper.
+        Measured example: on P-n22-k8 the reference solution costs 603 with 8
+        routes, while the free-fleet optimum proved here is 590 with 9 routes.
+        Neither number is wrong; they answer different questions. Pass
+        ``min_vehicles=max_vehicles=k`` to reproduce the fixed-fleet
+        convention, and say which convention a reported gap used.
     min_vehicles:
         Lower bound on the number of routes. Defaults to the bin-packing bound,
         which is always valid.

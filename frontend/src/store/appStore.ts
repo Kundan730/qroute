@@ -24,6 +24,15 @@ export interface AppState {
   /** Incremented on every successful bootstrap, so pages can refetch on reconnect. */
   generation: number;
   bootstrap: () => Promise<void>;
+  /**
+   * Re-check reachability without refetching the catalogues.
+   *
+   * The shell polls this while the backend is up. Without it the status badge
+   * only ever moved from offline to online, so an API process that died
+   * mid-demonstration left a green "backend online" on screen while every
+   * action failed with nothing but an HTTP status text to explain it.
+   */
+  recheck: () => Promise<void>;
 }
 
 function describe(error: unknown): string {
@@ -63,6 +72,22 @@ export const useAppStore = create<AppState>()((set, get) => ({
         generation: s.generation + 1,
       }));
     } catch (error) {
+      set({ backend: 'offline', health: null, error: describe(error) });
+    }
+  },
+
+  recheck: async () => {
+    // Only meaningful once a bootstrap has succeeded; while offline or in
+    // flight the bootstrap retry owns the transition and this would race it.
+    if (get().backend !== 'online') return;
+    try {
+      const health = await getHealth();
+      set({ health, error: null });
+    } catch (error) {
+      // The catalogues are deliberately left in place: they are still an
+      // accurate description of the backend that was there, and blanking them
+      // would empty every picker on the way back up. The badge carries the bad
+      // news, and bootstrap refills everything when the API returns.
       set({ backend: 'offline', health: null, error: describe(error) });
     }
   },

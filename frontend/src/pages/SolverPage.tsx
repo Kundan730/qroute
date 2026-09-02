@@ -69,7 +69,15 @@ export function SolverPage() {
 
   const ticks = run.ticks;
   const last = ticks.length > 0 ? ticks[ticks.length - 1] : null;
-  const bks = run.status?.bks ?? selected?.bks ?? null;
+  // The reference must belong to the instance the *displayed run* solved, not
+  // to whatever is currently chosen in the rail. A run started from the map
+  // page solves a road-network instance that has no best-known solution, and
+  // falling back to the selected benchmark instance's reference would price a
+  // Bengaluru drive time in seconds against a CVRPLIB cost and report a gap of
+  // several hundred per cent that means nothing at all.
+  const shownInstance = run.status?.instance ?? (run.streaming ? null : instanceName);
+  const referenceApplies = shownInstance === null || shownInstance === instanceName;
+  const bks = run.status?.bks ?? (referenceApplies ? (selected?.bks ?? null) : null);
   const bestCost = run.status?.best_cost ?? last?.best_cost ?? null;
   const gap =
     bks !== null && bestCost !== null && bks > 0 ? (100 * (bestCost - bks)) / bks : null;
@@ -249,7 +257,13 @@ export function SolverPage() {
             label="Gap to best known"
             value={gap === null ? '—' : fmtPercent(gap, 2)}
             tone={gap === null ? undefined : gap <= 0.001 ? 'ok' : gap < 2 ? 'warn' : 'bad'}
-            sub={bks === null ? 'no reference on disk' : `reference ${fmt(bks, 1)}`}
+            sub={
+              bks !== null
+                ? `reference ${fmt(bks, 1)}`
+                : shownInstance !== null && shownInstance !== instanceName
+                  ? `no reference for ${shownInstance}`
+                  : 'no reference on disk'
+            }
           />
           <Stat
             label="Iterations"

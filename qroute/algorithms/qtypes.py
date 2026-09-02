@@ -49,10 +49,11 @@ from __future__ import annotations
 import numpy as np
 
 # Magnitudes of the rotation angle, expressed as multiples of the base step
-# ``delta_theta``. Han and Kim tabulate them as absolute angles (0.005*pi to
-# 0.05*pi); with the default ``delta_theta = 0.01*pi`` these multipliers
-# reproduce those values exactly, while letting the whole table be scaled by a
-# single parameter or an annealing schedule.
+# ``delta_theta`` rather than as absolute angles. With the default
+# ``delta_theta = 0.01*pi`` they evaluate to 0.01*pi, 0.025*pi and 0.05*pi,
+# which are the values Han and Kim tabulate for the corresponding rows; keeping
+# them relative lets the whole table be scaled by one parameter or annealed by a
+# schedule without rewriting the ratios between rows.
 _MULT_AGREE_ONE = 2.5      # 0.025*pi - both strings say 1, reinforce it
 _MULT_AGREE_ZERO = 2.5     # 0.025*pi - both say 0 (see the note on tables below)
 _MULT_DISAGREE_WORSE = 5.0    # 0.05*pi  - move toward the better string's bit

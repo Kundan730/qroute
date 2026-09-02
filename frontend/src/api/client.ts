@@ -95,6 +95,18 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
     } catch {
       /* a non-JSON error body is not worth reporting verbatim */
     }
+    // 502/503/504 do not come from the API at all: they are the dev proxy (or a
+    // reverse proxy) saying it could not reach it. The bare status text for
+    // that case is "Bad Gateway", which sends the reader looking for a bug in
+    // the request rather than at the process that is not running.
+    if (response.status >= 502 && response.status <= 504) {
+      throw new ApiError(
+        `cannot reach the backend (HTTP ${response.status} for ${path}); ` +
+          'start it with `python -m qroute.api.app`',
+        path,
+        response.status,
+      );
+    }
     throw new ApiError(detail || `HTTP ${response.status}`, path, response.status);
   }
   if (response.status === 204) return {};
@@ -253,8 +265,13 @@ function toRouteCollection(value: unknown): RouteCollection | null {
       geometry: { type: 'LineString', coordinates: line },
       properties: {
         vehicle: Math.round(num(p.vehicle)),
-        length_m: numOrNull(p.length_m) ?? undefined,
-        travel_time_s: numOrNull(p.travel_time_s) ?? undefined,
+        // qroute.graph.network.route_geojson names these `distance_m` and
+        // `duration_s`; the other spellings are accepted so a rename on the
+        // backend degrades to the computed polyline length instead of silently
+        // showing nothing.
+        length_m: numOrNull(pick(p, 'distance_m', 'length_m', 'length')) ?? undefined,
+        travel_time_s:
+          numOrNull(pick(p, 'duration_s', 'travel_time_s', 'travel_time')) ?? undefined,
       },
     });
   }
@@ -394,6 +411,9 @@ export function parseRunStatus(value: unknown): RunStatus {
     coords: Array.isArray(coords) ? pairArray(coords) : null,
     error: typeof r.error === 'string' ? r.error : null,
     history: arr(r.history).map(toRunTick),
+    baseline_cost: numOrNull(r.baseline_cost),
+    parent_run_id: typeof r.parent_run_id === 'string' ? r.parent_run_id : null,
+    warm_started: r.warm_started === true,
   };
 }
 

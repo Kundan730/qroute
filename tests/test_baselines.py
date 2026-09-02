@@ -31,6 +31,7 @@ import numpy as np
 import pytest
 
 from qroute.algorithms.base import StopCriteria
+from qroute.algorithms.decoder import Decoder
 from qroute.algorithms.penalty import CONSTRAINTS, AdaptivePenalty
 from qroute.algorithms.registry import ALGORITHMS, build, catalogue, get, names
 from qroute.core.types import SolutionStats
@@ -156,14 +157,25 @@ def test_all_algorithms_share_one_objective(instance):
     disagreed about what a solution costs, their gap columns would not be
     comparable no matter how carefully the budgets were matched.
     """
-    reference = None
-    routes = None
+    # Pin one fixed route set that every solver must agree on. Using each
+    # solver's own output instead would only re-price whichever routes it
+    # happened to return, which is a tautology: make_solution is deterministic,
+    # so pricing the same routes twice can never disagree.
+    probe = [[1, 2, 3], [4, 5, 6], list(range(7, instance.n_customers + 1))]
+    reference = instance.make_solution(probe).cost
+
     for name in ALGO_NAMES:
-        result = build(name, instance, stop=StopCriteria(max_iterations=3), seed=4).solve()
-        if routes is None:
-            routes = result.best.routes
-            reference = instance.make_solution(routes).cost
-        assert instance.make_solution(routes).cost == pytest.approx(reference)
+        solver = build(name, instance, stop=StopCriteria(max_iterations=3), seed=4)
+        # Every solver reaches the shared objective through its own decoder, so
+        # ask that decoder what the probe costs. A solver that quietly used a
+        # different matrix, penalty set or vehicle cost shows up right here.
+        assert solver.decoder.evaluate_routes(probe).cost == pytest.approx(reference)
+
+        result = solver.solve()
+        # ... and the cost it actually reports must come from the reference
+        # evaluator, not from the penalised objective it minimises internally.
+        assert result.best_cost == pytest.approx(
+            instance.make_solution(result.best.routes).cost)
 
 
 # ----------------------------------------------------------- adaptive penalty
@@ -178,9 +190,22 @@ def test_penalty_initial_values_scale_with_the_instance(instance):
     # being a constant, so it is of the order of the cost-to-demand exchange rate.
     rate = instance.cost_matrix.max() / instance.demand.max()
     assert rate <= ap.capacity <= 100.0 * rate
-    assert ap.time_window == 1.0
-    assert ap.duration == 1.0
+    # The same must hold for the two time-unit constraints, and for the same
+    # reason: a controller that starts two orders of magnitude below the
+    # decoder's own weight spends its whole budget climbing back to the
+    # starting line. Compare against a real Decoder rather than a literal so
+    # this fails if either side is retuned independently.
+    dec = Decoder(instance)
+    assert ap.time_window == pytest.approx(dec.pen_tw)
+    assert ap.duration == pytest.approx(dec.pen_dur)
+    assert ap.time_window > 1.0        # instance-scaled, not the neutral default
     assert set(ap.as_dict()) == set(CONSTRAINTS)
+
+
+def test_penalty_without_an_instance_stays_neutral():
+    """With no instance there is nothing to scale to, so all three start at 1."""
+    ap = AdaptivePenalty(None)
+    assert (ap.capacity, ap.time_window, ap.duration) == (1.0, 1.0, 1.0)
 
 
 def test_penalty_rises_when_nothing_is_feasible():

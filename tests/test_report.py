@@ -275,18 +275,26 @@ def test_statistical_table_declines_politely_when_there_is_too_little_data(rows)
     assert all(row[1] == EM_DASH for row in table.rows)
 
 
+#: Instances the fixture gives a best-known cost, so a target can be scored
+#: against them at all. T-n40-k4 deliberately has none.
+SCORABLE = [name for name, _size, bks in INSTANCES if bks is not None]
+
+
 def test_convergence_table_says_not_reached_instead_of_dropping_runs(rows):
-    # A target that no synthetic run can reach: every cell must say so.
+    # A target that no synthetic run can reach: every scorable cell must say so,
+    # rather than the row vanishing or the runs being quietly excluded.
     table = report.convergence_table(rows, targets=(0.001,))
-    assert table.rows
-    assert all(row[2] == "not reached" for row in table.rows)
-    assert all(row[4].startswith("0/") for row in table.rows)
+    scored = [row for row in table.rows if row[0] in SCORABLE]
+    assert scored
+    assert all(row[2] == "not reached" for row in scored)
+    assert all(row[4].startswith("0/") and not row[4].endswith("/0") for row in scored)
     assert any("not reached" in note for note in table.notes)
 
 
 def test_convergence_table_reports_reached_targets_with_counts(rows):
     table = report.convergence_table(rows, targets=(5.0,))
-    reached = [row for row in table.rows if row[2] != "not reached"]
+    reached = [row for row in table.rows
+               if row[0] in SCORABLE and row[2] not in ("not reached", EM_DASH)]
     assert reached, "some algorithm should reach a 5% target in the fixture"
     for row in reached:
         hit, total = row[4].split("/")
@@ -417,3 +425,115 @@ def test_plots_are_deterministic(rows, tmp_path):
     first = plots.gap_distribution(rows, a)[0].read_bytes()
     second = plots.gap_distribution(rows, b)[0].read_bytes()
     assert first == second
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: a table must not invent a result it could not measure
+# ---------------------------------------------------------------------------
+def test_target_status_separates_not_reached_from_unmeasurable():
+    """"Never got there" and "could not be asked" are different answers, and the
+    convergence table is only honest if the code can tell them apart."""
+    reached = {"bks": 100.0, "history": [{"i": 1, "t": 0.5, "c": 100.5}]}
+    assert report.target_status(reached, 1.0)[0] == "reached"
+
+    missed = {"bks": 100.0, "history": [{"i": 1, "t": 0.5, "c": 200.0}]}
+    assert report.target_status(missed, 1.0) == ("not reached", None, None)
+
+    # No best known cost: "within 1% of the best known" has no meaning here.
+    no_bks = {"bks": None, "history": [{"i": 1, "t": 0.5, "c": 200.0}]}
+    assert report.target_status(no_bks, 1.0) == ("unknown", None, None)
+
+    # No history and no precomputed field for this target.
+    no_evidence = {"bks": 100.0, "time_to_1pct": 0.5}
+    assert report.target_status(no_evidence, 0.5) == ("unknown", None, None)
+    assert report.target_status(no_evidence, 1.0)[0] == "reached"
+    # The runner writes the key with a null value when the target was missed,
+    # which is evidence of failure rather than absence of evidence.
+    assert report.target_status({"bks": 100.0, "time_to_2pct": None,
+                                 "iters_to_2pct": None}, 2.0)[0] == "not reached"
+
+
+def test_convergence_never_claims_not_reached_for_an_instance_without_a_best_known(rows):
+    """T-n40-k4 has no reference cost, so no run of it can be scored against a
+    target; the table must say so rather than report every seed as a failure."""
+    table = report.convergence_table(rows, targets=(5.0,))
+    unscored = [row for row in table.rows if row[0] == "T-n40-k4"]
+    assert unscored
+    for row in unscored:
+        assert row[2] == EM_DASH
+        assert row[3] == EM_DASH
+        assert row[4] == "0/0"
+        assert "not reached" not in row
+    assert any("could not be evaluated" in note for note in table.notes)
+
+
+def test_convergence_counts_only_measurable_runs_in_the_denominator(rows):
+    scored = [row for row in report.convergence_table(rows, targets=(5.0,)).rows
+              if row[0] == "T-n20-k3"]
+    assert scored
+    for row in scored:
+        total = row[4].split("/")[1]
+        assert int(total) > 0
+
+
+def test_ablation_delta_equals_the_difference_of_the_printed_means(rows):
+    """A reader who subtracts the two mean-gap cells must get the delta cell."""
+    table = report.ablation_table(rows)
+    i_mean = table.columns.index("Mean gap %")
+    i_delta = table.columns.index("Change vs full method")
+    reference = float(table.rows[0][i_mean])
+    for row in table.rows[1:]:
+        assert float(row[i_delta]) == pytest.approx(float(row[i_mean]) - reference, abs=5e-3)
+
+
+def test_tier_summary_does_not_overstate_the_runs_behind_a_mean_gap(rows):
+    """The small tier mixes an instance with a best known cost and one without.
+    The gap columns are computed from the former only, so their denominator must
+    be the smaller count, not every run in the tier."""
+    table = report.tier_summary_table(rows)
+    i_runs = table.columns.index("Runs")
+    i_hits = table.columns.index("Runs at best known")
+    small = [row for row in table.rows if row[0].startswith("small")]
+    assert small
+    for row in small:
+        _hit, total = row[i_hits].split("/")
+        assert int(total) < int(row[i_runs]), "half these runs have no best known cost"
+    assert any("no best known cost" in note for note in table.notes)
+
+
+def test_main_results_never_drops_an_algorithm_the_caller_did_not_list(rows):
+    """A summary is an ordering hint. It must not silently delete columns."""
+    table = report.main_results_table(rows, summary={"algorithms": ["pso", "qpso"]})
+    algos = table.columns[3:-1]
+    assert algos[:2] == ["pso", "qpso"]
+    assert set(algos) == set(ALGORITHMS)
+
+
+def test_statistical_table_rejects_a_control_that_never_ran(rows):
+    with pytest.raises(ValueError, match="did not produce any completed run"):
+        report.statistical_table(rows, control="no-such-algorithm")
+
+
+def test_time_to_target_excludes_unmeasurable_runs_from_the_ecdf(rows, tmp_path):
+    """Runs on an instance with no best known cost must not be counted as
+    failures to reach the target; the legend counts must reflect that."""
+    from qroute.benchmark.report import target_status
+
+    scorable = sum(1 for r in rows
+                   if r.get("status", "ok") == "ok"
+                   and target_status(r, 5.0)[0] != "unknown")
+    assert scorable < len([r for r in rows if r.get("status", "ok") == "ok"])
+    _nonempty(plots.time_to_target(rows, tmp_path, pct=5.0))
+
+
+def test_a_long_failure_list_says_it_was_truncated(rows, tmp_path):
+    """Twenty failures listed and thirty suppressed must not read as twenty
+    failures total."""
+    many = list(rows) + [{"instance": "T-n20-k3", "algorithm": "ga", "seed": s,
+                          "status": "error", "error": f"RuntimeError: failure {s}",
+                          "seconds": 0.1}
+                         for s in range(50)]
+    md = report.build_report(many, tmp_path)["report_md"].read_text()
+    assert "51 runs failed" in md
+    assert "further failures" in md
+    assert md.count("RuntimeError") == 20

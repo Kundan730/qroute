@@ -36,12 +36,19 @@ the fork server is started before any road network is loaded - which
 it never has PROJ mapped, so there is no atfork handler to run and nothing to
 crash.
 
-It fixes a second, less spectacular problem at the same time. ``spawn``
-re-executes the parent's main module in the child; under ``python -m uvicorn``
-that is harmless, but under an interactive interpreter or a ``python - <<EOF``
-heredoc the child dies trying to re-run ``<stdin>``. A fork server preloads a
-named module list instead, and we preload this module, so a worker starts with
-its own code already imported.
+The fork server also gets a warm-up for free. Its preload list is a set of
+module names it imports once, and every worker is a fork of that process, so
+importing the solver modules and materialising the compiled kernels there is
+paid once at startup rather than in each worker. Measured on a 35-stop road
+instance: the first iteration reached the browser after 3.64 s without it and
+after 0.18 s with it, which on a five-second run is the difference between four
+iterations and twenty-one.
+
+A separate hazard, shared by both start methods, is that the child re-executes
+the parent's ``__main__`` before it runs anything of ours. That is harmless
+under a guarded entry point and fatal under a heredoc or a REPL.
+:func:`_neutral_main_module` suppresses it, so how the server was launched stops
+mattering.
 
 How progress gets back
 ----------------------
@@ -73,17 +80,19 @@ nothing.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
 import multiprocessing as mp
 import os
 import queue as queue_mod
+import sys
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -111,8 +120,22 @@ START_METHODS: tuple[str, ...] = ("forkserver", "spawn")
 
 #: Modules the fork server imports once, so every worker starts with them ready.
 #: ``__main__`` is deliberately absent: including it is what makes ``spawn``
-#: re-execute the parent's entry point in the child.
-FORKSERVER_PRELOAD: list[str] = ["qroute.api.runs"]
+#: re-execute the parent's entry point in the child. Importing the solver
+#: modules here costs 2.2 seconds once, in the fork server, instead of 2.2
+#: seconds in every worker.
+FORKSERVER_PRELOAD: list[str] = [
+    "qroute.api.runs",
+    "qroute.algorithms.qpso",
+    "qroute.algorithms.pso",
+    "qroute.algorithms.ga",
+    "qroute.algorithms.sa",
+    "qroute.algorithms.aco",
+]
+
+#: Set in the fork server's environment, and read at the bottom of this module.
+#: It is how a warm-up gets executed inside the fork server, whose only hook is
+#: a list of module names to import.
+WORKER_PRELOAD_ENV: str = "QROUTE_WORKER_PRELOAD"
 
 
 # --------------------------------------------------------------------------
@@ -306,14 +329,103 @@ def _worker_context():
         if method == "forkserver":
             try:
                 context.set_forkserver_preload(FORKSERVER_PRELOAD)
+                # The fork server is exec'd as a fresh interpreter and inherits
+                # this environment, so the flag reaches it and nothing else: the
+                # web server process has already imported this module, and the
+                # workers are forks of the fork server rather than new imports.
+                os.environ[WORKER_PRELOAD_ENV] = "1"
             except Exception:  # pragma: no cover - defensive
                 log.exception("could not set the fork server preload list")
         return context
     return mp.get_context()  # pragma: no cover - no supported method
 
 
+#: Serialises the brief window in which ``__main__`` is disguised, below.
+_START_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _neutral_main_module():
+    """Stop a worker from re-executing the parent's entry point.
+
+    Both ``spawn`` and ``forkserver`` run ``multiprocessing.spawn.prepare`` in
+    the child, which re-imports or re-executes whatever the parent's ``__main__``
+    is. That is fine when the parent was started from a guarded script, and fatal
+    otherwise: launched from a heredoc the child dies with
+    ``FileNotFoundError: .../<stdin>``, and launched from a module with side
+    effects it would run them a second time.
+
+    ``multiprocessing`` skips the fixup entirely when the main module's spec is
+    named ``__main__``, so for the moment it takes to hand the child its
+    preparation data we present a spec that says exactly that. The child then
+    starts with a bare ``__main__``, which is all a worker needs: everything it
+    runs is imported from :mod:`qroute`, and nothing in the payload refers to a
+    class defined in the parent's entry point.
+
+    The disguise is process-wide while it lasts, so it is held under a lock and
+    restored in a ``finally``.
+    """
+    main = sys.modules.get("__main__")
+    if main is None:  # pragma: no cover - no interpreter has no __main__
+        yield
+        return
+
+    class _MainSpec:
+        name = "__main__"
+
+    with _START_LOCK:
+        had_spec = hasattr(main, "__spec__")
+        previous = getattr(main, "__spec__", None)
+        try:
+            main.__spec__ = _MainSpec()
+            yield
+        finally:
+            if had_spec:
+                main.__spec__ = previous
+            else:  # pragma: no cover - every module normally has __spec__
+                del main.__spec__
+
+
 def _noop() -> None:
     """Body of the priming child. Exists only to force the fork server up."""
+
+
+def warm_kernels() -> float:
+    """Compile and load the JIT kernels by solving a tiny instance.
+
+    Called at the bottom of this module when it is imported by the fork server.
+    Every worker is then a fork of a process in which the compiled kernels are
+    already resident, and its first iteration lands in milliseconds instead of
+    after four seconds - measured: 2.2 s to import the solver modules plus 1.9 s
+    to materialise the cached kernels, which on a five-second run would have
+    been most of the budget.
+
+    Returns the seconds it took. Failures are logged and swallowed: a worker
+    that has to compile its own kernels is slow, not broken.
+    """
+    started = time.perf_counter()
+    try:
+        from qroute.algorithms.base import StopCriteria
+        from qroute.algorithms.qpso import QPSO
+        from qroute.core.rng import make_rng
+        from qroute.problems.instance import Instance
+
+        rng = make_rng(0)
+        coords = rng.uniform(0.0, 100.0, size=(9, 2))
+        diff = coords[:, None, :] - coords[None, :, :]
+        demand = np.zeros(9)
+        demand[1:] = 5.0
+        instance = Instance(
+            name="worker-warmup",
+            distance=np.sqrt((diff**2).sum(-1)),
+            demand=demand,
+            capacity=20.0,
+        )
+        QPSO(instance, StopCriteria(max_iterations=2, max_seconds=60.0),
+             seed=0, swarm_size=6).solve()
+    except Exception:  # pragma: no cover - defensive
+        log.exception("worker kernel warm-up failed")
+    return time.perf_counter() - started
 
 
 def _emit(progress_queue, message: dict[str, Any]) -> None:
@@ -427,7 +539,11 @@ def _build_and_solve(algorithm, instance, stop, seed, params, callback, holder, 
     if algorithm in ("cpsat", "exact"):
         from qroute.exact.cpsat import solve_cpsat
 
-        return solve_cpsat(instance, seconds=stop.max_seconds, **params)
+        # CP-SAT names its budget ``time_limit``, not ``seconds``; also confine
+        # it to one worker so an exact run does not take every core of the
+        # machine that is simultaneously serving the browser.
+        params = {"workers": 1, "seed": seed, **params}
+        return solve_cpsat(instance, time_limit=stop.max_seconds, **params)
     if algorithm in ("random", "restart"):
         from qroute.benchmark.reference import RandomRestart
 
@@ -446,6 +562,15 @@ def _build_and_solve(algorithm, instance, stop, seed, params, callback, holder, 
 # --------------------------------------------------------------------------
 # Server-side run records
 # --------------------------------------------------------------------------
+
+
+class TooManyRuns(RuntimeError):
+    """Raised when the concurrency limit is reached; the endpoint returns 429.
+
+    A distinct type rather than a bare ``RuntimeError`` so that a failure to
+    launch a worker - which is a server fault, not a busy server - cannot be
+    reported to the browser as "wait your turn".
+    """
 
 
 @dataclass
@@ -504,6 +629,7 @@ class RunRegistry:
         self._context = _worker_context()
         self.start_method = self._context.get_start_method()
         self.primed = False
+        self.prime_seconds = 0.0
 
     # -------------------------------------------------------------- plumbing
     def prime(self) -> bool:
@@ -515,11 +641,15 @@ class RunRegistry:
         at all - a failure here is worth knowing about at boot rather than when
         a judge presses "solve".
 
-        Returns whether priming succeeded. Costs roughly a tenth of a second.
+        Returns whether priming succeeded. The cost is the fork server's own
+        start-up plus its preload, which is reported as ``prime_seconds`` in
+        ``/api/health``.
         """
+        started = time.perf_counter()
         try:
             process = self._context.Process(target=_noop, name="qroute-prime", daemon=True)
-            process.start()
+            with _neutral_main_module():
+                process.start()
             process.join(timeout=30.0)
             self.primed = process.exitcode == 0
             if not self.primed:  # pragma: no cover - platform dependent
@@ -527,6 +657,11 @@ class RunRegistry:
         except Exception:  # pragma: no cover - platform dependent
             log.exception("could not start the solver worker launcher")
             self.primed = False
+        self.prime_seconds = time.perf_counter() - started
+        log.info(
+            "solver worker launcher (%s) ready in %.2fs",
+            self.start_method, self.prime_seconds,
+        )
         return self.primed
 
     def _queue(self):
@@ -581,14 +716,9 @@ class RunRegistry:
     ) -> RunRecord:
         """Launch a solver process and return its record.
 
-        Raises ``RuntimeError`` when the concurrency limit is reached, which the
-        endpoint turns into a 429.
+        Raises :class:`TooManyRuns` when the concurrency limit is reached, which
+        the endpoint turns into a 429.
         """
-        if self.active_count() >= self.max_active:
-            raise RuntimeError(
-                f"{self.max_active} runs are already in flight; cancel one or wait"
-            )
-
         instance = stored.instance
         record = RunRecord(
             run_id=uuid.uuid4().hex[:12],
@@ -604,6 +734,21 @@ class RunRegistry:
             baseline_cost=baseline_cost,
             network_id=stored.network_id,
         )
+
+        # Claiming the slot and registering the record happen in one critical
+        # section. Counting first and registering afterwards looks equivalent
+        # but is not: launching a worker takes tens of milliseconds, and four
+        # browser tabs pressing "solve" together all counted zero active runs
+        # and all started, so the machine ran six solvers against a limit of
+        # four. The record starts life in the "queued" state, which
+        # ``is_terminal`` excludes, so it occupies its slot from here on.
+        with self._lock:
+            active = sum(1 for r in self._runs.values() if not r.is_terminal)
+            if active >= self.max_active:
+                raise TooManyRuns(
+                    f"{self.max_active} runs are already in flight; cancel one or wait"
+                )
+            self._runs[record.run_id] = record
 
         progress_queue = self._queue()
         payload = {
@@ -624,7 +769,18 @@ class RunRegistry:
         record.process = process
         record.state = "running"
         record.started_at = time.time()
-        process.start()
+        try:
+            with _neutral_main_module():
+                process.start()
+        except Exception as exc:  # pragma: no cover - only if the OS refuses a fork
+            # The slot was claimed above, so it has to be given back here or a
+            # launcher failure would permanently consume one of the four.
+            with record.lock:
+                record.state = "failed"
+                record.error = f"could not start the solver process: {type(exc).__name__}: {exc}"
+                record.finished_at = time.time()
+            log.exception("run %s could not be launched", record.run_id)
+            raise
 
         reader = threading.Thread(
             target=self._drain,
@@ -635,8 +791,6 @@ class RunRegistry:
         record.reader = reader
         reader.start()
 
-        with self._lock:
-            self._runs[record.run_id] = record
         log.info(
             "run %s started: %s on %s (seed %d, %.1fs)",
             record.run_id, algorithm, stored.name, seed, max_seconds,
@@ -961,7 +1115,18 @@ async def stream_run(registry: RunRegistry, record: RunRecord, poll: float = 0.0
         await asyncio.sleep(poll)
 
 
-def iter_sse_lines(payload: Iterator[dict[str, Any]]) -> Iterator[str]:  # pragma: no cover
-    """Render SSE dictionaries as wire text. Used only by tests and by curl."""
-    for message in payload:
-        yield f"event: {message['event']}\ndata: {message['data']}\n\n"
+
+# --------------------------------------------------------------------------
+# Fork-server warm-up
+# --------------------------------------------------------------------------
+#
+# Reached only inside the fork server process, which is exec'd with
+# WORKER_PRELOAD_ENV set (see :func:`_worker_context`) and whose only extension
+# point is the list of modules it imports. Importing this module there therefore
+# also compiles the kernels, and every worker forked from it inherits them.
+if os.environ.get(WORKER_PRELOAD_ENV) == "1":  # pragma: no cover - subprocess only
+    os.environ.pop(WORKER_PRELOAD_ENV, None)
+    for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                 "NUMBA_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(_var, "1")
+    _WARM_SECONDS = warm_kernels()

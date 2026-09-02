@@ -10,7 +10,10 @@ grouped by what a user actually wants to do:
     paired significance test rather than a single lucky run.
 ``bench`` / ``report``
     Run and re-read a full reproducible sweep through
-    :class:`~qroute.benchmark.runner.BenchmarkRunner`.
+    :class:`~qroute.benchmark.runner.BenchmarkRunner`. The written report and
+    the figures are delegated to :mod:`qroute.benchmark.report` and
+    :mod:`qroute.benchmark.plots` when those modules are installed, so a number
+    quoted in the terminal is the number in the submitted document.
 ``exact``
     Answer "what is the true optimum?" on instances small enough to close, so
     the heuristic's gap is measured against proof rather than against folklore.
@@ -263,8 +266,9 @@ def _write_json(path: Path, payload: dict) -> None:
 @app.command()
 def solve(
     instance: Annotated[str, typer.Argument(help="Instance name (A-n32-k5) or path to a file.")],
-    algorithm: Annotated[str, typer.Option("--algorithm", "-a",
-                                           help="qpso, pso, ga, sa, aco, ortools, pyvrp, cpsat, random.")] = "qpso",
+    algorithm: Annotated[str, typer.Option(
+        "--algorithm", "-a",
+        help="qpso, pso, ga, sa, aco, ortools, pyvrp, cpsat or random.")] = "qpso",
     seconds: Annotated[float, typer.Option("--seconds", "-t", help="Wall-clock budget.")] = 10.0,
     seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = 0,
     params: Annotated[Optional[list[str]], typer.Option("--params", "-p",
@@ -377,7 +381,7 @@ def compare(
             test = None
         else:
             w = wilcoxon(control_scores, scores, (control, name))
-            test = render.Text(w.describe())
+            test = Text(w.describe())
             if w.winner and w.p_value <= 0.05:
                 test.stylize("green" if w.winner == control else "yellow")
         entries.append({
@@ -557,12 +561,27 @@ def report(
             con.print(failures)
         _report_missing_solutions(rows)
     elif fmt in ("markdown", "md"):
-        text = render.markdown_report(summary, meta)
-        if out is not None:
-            Path(out).write_text(text)
-            con.print(f"[dim]wrote[/dim] {out}")
+        # The benchmark package owns the canonical report tables, so the written
+        # submission and the terminal quote the same numbers. The CLI keeps its
+        # own markdown only as a fallback for a checkout without that module.
+        try:
+            from qroute.benchmark.report import build_report
+        except ImportError:
+            build_report = None
+        if build_report is not None and out is None:
+            built = build_report(rows, result_dir, summary=summary, meta=meta)
+            written = built.get("files") or built.get("paths") or []
+            con.print(f"[dim]wrote {len(written) or 'the'} report files under[/dim] {result_dir}")
+            report_md = Path(result_dir) / "report.md"
+            if report_md.exists():
+                print(report_md.read_text())
         else:
-            print(text)
+            text = render.markdown_report(summary, meta)
+            if out is not None:
+                Path(out).write_text(text)
+                con.print(f"[dim]wrote[/dim] {out}")
+            else:
+                print(text)
     elif fmt == "csv":
         text = render.csv_rows(rows)
         if out is not None:
@@ -574,7 +593,16 @@ def report(
         raise _fail(f"unknown format {fmt!r}", "use table, markdown or csv")
 
     if plots:
-        paths = render.write_plots(rows, summary, result_dir / "figures")
+        # Same reasoning as for the markdown: the figures in the submission come
+        # from qroute.benchmark.plots when it is present.
+        try:
+            from qroute.benchmark.plots import all_plots
+        except ImportError:
+            all_plots = None
+        if all_plots is not None:
+            paths = all_plots(rows, result_dir / "figures")
+        else:
+            paths = render.write_plots(rows, summary, result_dir / "figures")
         if paths:
             for p in paths:
                 con.print(f"[dim]wrote[/dim] {p}")

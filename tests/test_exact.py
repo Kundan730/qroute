@@ -388,3 +388,66 @@ def test_four_independent_methods_agree_on_the_tiny_optimum():
     }
     for label, value in costs.items():
         assert value == pytest.approx(TINY_OPT), f"{label} disagrees: {value}"
+
+
+def test_free_fleet_and_fixed_fleet_are_different_problems():
+    """A CVRPLIB best-known value can assume a fixed fleet.
+
+    On P-n22-k8 the published solution costs 603 using 8 routes, but the
+    unrestricted-fleet optimum is 590 using 9. Both are correct answers to
+    different questions, and a benchmark that mixes them up will report a
+    negative gap and look like it has a bug. This test pins the distinction so
+    nobody "fixes" the free-fleet default by accident.
+    """
+    inst = load("P-n22-k8")
+    assert inst.meta["bks"] == pytest.approx(603.0)
+
+    free = solve_cvrp_cpsat(inst, time_limit=120, workers=8)
+    assert free.proven_optimal
+    assert free.cost == pytest.approx(590.0)
+    assert len(free.routes) == 9
+    sol = inst.make_solution(free.routes)
+    sol.validate(inst.n_customers)
+    assert sol.is_feasible and sol.cost == pytest.approx(590.0)
+
+    # Constrained to the reference fleet, the reference value is reachable.
+    fixed = solve_cvrp_cpsat(inst, time_limit=120, workers=8,
+                             min_vehicles=8, max_vehicles=8)
+    assert fixed.cost == pytest.approx(603.0)
+    assert len(fixed.routes) == 8
+
+
+def test_solution_callback_failure_cannot_truncate_the_search():
+    """A broken recorder must cost the curve, never the solve.
+
+    An exception raised inside a CP-SAT callback aborts the search, which would
+    silently return a weaker bound than the time limit was meant to buy. The
+    recorder therefore swallows its own errors. Here the conversion it performs
+    is sabotaged, so every callback fails internally.
+    """
+    from qroute.exact import cpsat as cpsat_mod
+
+    class _BrokenScaling:
+        factor = 1
+        exact = True
+
+        def to_float(self, value):
+            raise RuntimeError("conversion is broken")
+
+    class _BrokenRecorder(cpsat_mod._SolutionRecorder):
+        def __init__(self, scaling, t0):
+            super().__init__(scaling, t0)
+            self._scaling = _BrokenScaling()
+
+    inst = load(TINY)
+    original = cpsat_mod._SolutionRecorder
+    try:
+        cpsat_mod._SolutionRecorder = _BrokenRecorder
+        result = solve_cvrp_cpsat(inst, time_limit=60, workers=8)
+    finally:
+        cpsat_mod._SolutionRecorder = original
+
+    # The proof still goes through even though every callback raised inside.
+    assert result.proven_optimal
+    assert result.cost == pytest.approx(TINY_OPT)
+    assert result.curve == []

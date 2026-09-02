@@ -42,6 +42,7 @@ from qroute import __version__
 from qroute.api import networks as networks_module
 from qroute.api.runs import (
     RunRegistry,
+    TooManyRuns,
     algorithm_catalogue,
     known_algorithms,
     stream_run,
@@ -189,20 +190,17 @@ def _register_routes(app: FastAPI) -> None:
         system is a real property of the platform and a judge is entitled to see
         it.
         """
-        from qroute.baselines import pyvrp_hgs
-        from qroute.problems.loaders import list_instances
+        from qroute.algorithms.registry import names as algorithm_names
 
+        # Everything read here is either already in memory or cached: health is
+        # polled while the server warms up, and a poll that blocks on a disk
+        # scan or a first import would misreport the very latency it exists to
+        # describe.
+        solvers = STATE.solvers if STATE.solvers["probed"] else STATE.probe_solvers()
         try:
-            counts = list_instances()
-            n_instances = sum(len(v) for v in counts.values())
+            n_instances = len(STATE.benchmark_instances())
         except Exception:  # pragma: no cover - only if the data directory is gone
             n_instances = 0
-        ortools_ok = True
-        try:
-            import ortools  # noqa: F401
-        except Exception:  # pragma: no cover
-            ortools_ok = False
-        from qroute.algorithms.registry import names as algorithm_names
 
         return {
             "status": "ok",
@@ -214,13 +212,14 @@ def _register_routes(app: FastAPI) -> None:
             "network_ids": STATE.available_network_ids(),
             "networks_loaded": STATE.loaded_network_ids(),
             "networks_loading": STATE.loading_network_ids(),
-            "ortools_available": ortools_ok,
-            "pyvrp_available": pyvrp_hgs.available(),
-            "pyvrp_version": pyvrp_hgs.version(),
+            "ortools_available": solvers["ortools_available"],
+            "pyvrp_available": solvers["pyvrp_available"],
+            "pyvrp_version": solvers["pyvrp_version"],
             "warmup": STATE.warmup,
             "active_runs": STATE.runs.active_count() if STATE.runs else 0,
             "worker_start_method": STATE.runs.start_method if STATE.runs else None,
             "workers_primed": bool(STATE.runs and STATE.runs.primed),
+            "worker_prime_seconds": round(STATE.runs.prime_seconds, 3) if STATE.runs else None,
         }
 
     # -------------------------------------------------------- algorithms
@@ -280,7 +279,7 @@ def _register_routes(app: FastAPI) -> None:
                 max_iterations=request.max_iterations,
                 params=request.params,
             )
-        except RuntimeError as exc:
+        except TooManyRuns as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from None
         return {"run_id": record.run_id}
 
@@ -377,7 +376,7 @@ def _register_routes(app: FastAPI) -> None:
                 parent_run_id=parent.run_id,
                 baseline_cost=baseline_cost,
             )
-        except RuntimeError as exc:
+        except TooManyRuns as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from None
         return {"run_id": record.run_id}
 
