@@ -1,6 +1,0 @@
-Algorithm,Mean rank,Holm-corrected p vs control,Effect size,Finding
-ga,1.67,—,—,control algorithm (lowest mean rank)
-qpso,2.67,1,1.00,no significant difference from ga at alpha = 0.05 (n = 3 instances)
-pso,3.00,1,1.00,no significant difference from ga at alpha = 0.05 (n = 3 instances)
-qpso-nols,3.33,1,1.00,no significant difference from ga at alpha = 0.05 (n = 3 instances)
-random,4.33,1,1.00,no significant difference from ga at alpha = 0.05 (n = 3 instances)

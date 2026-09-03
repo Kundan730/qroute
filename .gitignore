@@ -31,5 +31,7 @@ results/runs/**/rows.jsonl
 
 # OS / editors
 .DS_Store
+qroute.egg-info/
+cache/
 .idea/
 .vscode/

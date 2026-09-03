@@ -127,11 +127,6 @@ export default function App() {
               solver running
             </span>
           )}
-          {health?.version && (
-            <span className="mono" style={{ color: 'var(--navy-100)' }}>
-              v{health.version}
-            </span>
-          )}
           <span style={statusChip} role="status">
             <span style={{ color: markColor, display: 'inline-flex' }}>
               <Mark

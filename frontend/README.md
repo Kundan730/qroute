@@ -1,32 +1,15 @@
-# React + TypeScript + Vite
+# qroute web interface
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The React front end of the qroute platform. It is served in production by the
+Python backend from `dist/`, so there is nothing to deploy separately.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run build        # writes dist/, which the API serves at /
+npm run dev          # Vite dev server, expects the API on :8000
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The design system lives in `src/styles/global.css` and the two
+information-carrying colour scales live in `src/lib/colors.ts`. Those two files
+are the source of truth; components take colours from their tokens and never
+declare their own.
