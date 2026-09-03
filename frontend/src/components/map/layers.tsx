@@ -123,12 +123,12 @@ export function EdgeLayer({
     if (!feature) return undefined;
     const points: LatLng[] = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
     const width = edgeWeight(feature.properties.highway, false) + 0.6;
-    // Three strokes, because one cannot be seen on all three base layers. The
-    // white outer casing is what makes the highlight visible over satellite
-    // imagery and the dark map; the accent ring is what makes it visible over
-    // the pale one; and the segment is then redrawn in its own congestion
-    // colour on top, so selecting an edge never hides the value that the edge
-    // was selected to inspect.
+    // Three strokes, because no one stroke can be seen on all three base
+    // layers. The white outer casing is what makes the highlight visible over
+    // satellite imagery and the dark map; the navy ring is what makes it
+    // visible over the pale one; and the segment is then redrawn in its own
+    // congestion colour on top, so selecting an edge never hides the value
+    // that the edge was selected to inspect.
     const halo = L.layerGroup([
       L.polyline(points, {
         color: casing(),
@@ -137,7 +137,7 @@ export function EdgeLayer({
         interactive: false,
       }),
       L.polyline(points, {
-        color: token('--accent'),
+        color: token('--navy'),
         weight: width + 4,
         opacity: 0.95,
         interactive: false,
@@ -162,29 +162,31 @@ export function EdgeLayer({
 /**
  * The depot, drawn as a diamond rather than as a larger dot.
  *
- * Shape is what makes it findable. In a field of a hundred customers a reader
- * picks out the one mark that is not a circle immediately, without having to
- * compare two sizes or two hues against each other, and that holds at any
- * zoom and for any reader. Colour then reinforces it: the accent is the one
- * saturated hue in the chrome, and the depot is the one place on the map that
- * earns it.
+ * Shape and figure-ground, not hue, are what make it findable. In a field of a
+ * hundred customers a reader picks out the one mark that is not a dot
+ * immediately, without having to compare two sizes or two colours, and that
+ * holds at any zoom and for any reader. So the depot is a diamond, and it is
+ * the inverse of a customer: navy on white where they are white on navy. An
+ * open symbol for the origin is the older convention and it survives being
+ * printed in one ink.
  *
- * It is a div icon rather than a Leaflet vector so the casing can be written
- * in tokens directly: a white border to lift it off aerial imagery and the
- * dark basemap, and a navy hairline outside that border, because on the pale
- * basemap a white casing on a near-white background would otherwise be no
- * casing at all. There is exactly one of these per instance, so the cost of a
- * DOM node is irrelevant here in a way it would not be for the customers.
+ * Keeping it to navy and white is also what makes it work over three base
+ * layers at once — no map colour is spent on it, and the two tones bracket
+ * every basemap between them. It is a div icon rather than a Leaflet vector so
+ * the casing can be written in tokens directly, with a white hairline outside
+ * the navy edge for the dark basemap. There is exactly one of these per
+ * instance, so a DOM node costs nothing here in the way it would for the
+ * customers.
  */
 const DEPOT_ICON = L.divIcon({
   className: '',
   iconSize: [20, 20],
   iconAnchor: [10, 10],
-  popupAnchor: [0, -11],
+  popupAnchor: [0, -12],
   html:
-    '<span style="display:block;width:12px;height:12px;margin:2px;' +
-    'transform:rotate(45deg);background:var(--accent);' +
-    'border:2px solid var(--panel);box-shadow:0 0 0 1px var(--navy);"></span>',
+    '<span style="display:block;width:10px;height:10px;margin:2px;' +
+    'transform:rotate(45deg);background:var(--panel);' +
+    'border:3px solid var(--navy);box-shadow:0 0 0 1px var(--panel);"></span>',
 });
 
 export function StopsLayer({ instance }: { instance: InstanceDetail | null }) {

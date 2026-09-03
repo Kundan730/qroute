@@ -12,8 +12,20 @@
  * distribution has unbounded support, so its histogram has thin but non-zero
  * tails across the whole domain.
  *
- * Everything is drawn on one canvas at device pixel ratio, which keeps the axis
- * labels crisp on a projector.
+ * Drawing rules, so the figure survives the two places it will be seen:
+ *
+ *  - Every colour is read from the design tokens at draw time rather than
+ *    written as a literal, with a fallback so a first paint before the
+ *    stylesheet settles still draws something sane.
+ *  - The contrast the figure is about is carried by colour AND by shape. The
+ *    classical particle is neutral navy and the quantum one is the accent; the
+ *    mean-best reference is a hollow square on a dashed rule and the swarm best
+ *    is a filled triangle on a solid one, so a greyscale print of this panel
+ *    still says which line is which.
+ *  - The backing store is sized by devicePixelRatio, so the axis labels stay
+ *    crisp on a retina display and on a projector.
+ *  - If the reader has asked for reduced motion, the simulation is run to its
+ *    settled state and drawn once instead of animating.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -34,6 +46,8 @@ const DOMAIN: [number, number] = [-1, 1];
 /** Where the swarm's best and the particle's own best sit, in domain units. */
 const GBEST = 0.18;
 const PBEST = -0.32;
+/** Steps drawn immediately when motion is suppressed. */
+const STATIC_STEPS = 1500;
 
 interface Particle {
   x: number;
@@ -55,10 +69,79 @@ function record(p: Particle, x: number): void {
   }
 }
 
+/**
+ * The design tokens this figure draws with, resolved from the document element.
+ * Canvas cannot take a `var()`, so the values are read once per mount; the
+ * fallbacks are the same values global.css defines, for the case where the
+ * first paint happens before the stylesheet has been applied.
+ */
+interface Tokens {
+  classical: string;
+  quantum: string;
+  meanBest: string;
+  swarmBest: string;
+  axis: string;
+  grid: string;
+  label: string;
+  dim: string;
+  surface: string;
+  panel: string;
+  display: string;
+  mono: string;
+}
+
+function readTokens(): Tokens {
+  const fallback: Tokens = {
+    classical: '#686f7c',
+    quantum: '#3b5bd9',
+    meanBest: '#424b5c',
+    swarmBest: '#5b4fcf',
+    axis: '#c2c8d4',
+    grid: '#dce0e8',
+    label: '#686f7c',
+    dim: '#5a6376',
+    surface: '#f6f8fb',
+    panel: '#ffffff',
+    display: "'Urbanist', sans-serif",
+    mono: "'DM Mono', monospace",
+  };
+  if (typeof window === 'undefined') return fallback;
+  const cs = getComputedStyle(document.documentElement);
+  const get = (name: string, fb: string): string => cs.getPropertyValue(name).trim() || fb;
+  return {
+    classical: get('--navy-300', fallback.classical),
+    quantum: get('--accent', fallback.quantum),
+    meanBest: get('--navy-400', fallback.meanBest),
+    swarmBest: get('--violet', fallback.swarmBest),
+    axis: get('--border-strong', fallback.axis),
+    grid: get('--border', fallback.grid),
+    label: get('--navy-300', fallback.label),
+    dim: get('--text-dim', fallback.dim),
+    surface: get('--panel-alt', fallback.surface),
+    panel: get('--panel', fallback.panel),
+    display: get('--display', fallback.display),
+    mono: get('--mono', fallback.mono),
+  };
+}
+
+/** `letterSpacing` is well supported but not in every DOM typing; keep it soft. */
+function setTracking(ctx: CanvasRenderingContext2D, value: string): void {
+  (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = value;
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
 export function SamplingDemo() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [beta, setBeta] = useState(0.75);
-  const [running, setRunning] = useState(true);
+  const [reduced] = useState(prefersReducedMotion);
+  const [running, setRunning] = useState(!reduced);
   const [resetKey, setResetKey] = useState(0);
   // The animation loop reads beta every step; keeping it in a ref means moving
   // the slider does not tear down and restart the simulation, which would throw
@@ -74,6 +157,7 @@ export function SamplingDemo() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return undefined;
 
+    const tk = readTokens();
     const rng = mulberry32(20260920 + resetKey);
     const classical = newParticle(0.6);
     const quantum = newParticle(0.6);
@@ -116,94 +200,177 @@ export function SamplingDemo() {
       record(quantum, quantum.x);
     };
 
+    /** A hollow square: the mean-best reference. */
+    const square = (x: number, y: number, s: number, colour: string): void => {
+      ctx.strokeStyle = colour;
+      ctx.fillStyle = tk.panel;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.rect(x - s / 2, y - s / 2, s, s);
+      ctx.fill();
+      ctx.stroke();
+    };
+
+    /** A filled triangle: the swarm-best reference. */
+    const triangle = (x: number, y: number, s: number, colour: string): void => {
+      ctx.fillStyle = colour;
+      ctx.beginPath();
+      ctx.moveTo(x, y + s * 0.55);
+      ctx.lineTo(x - s * 0.55, y - s * 0.45);
+      ctx.lineTo(x + s * 0.55, y - s * 0.45);
+      ctx.closePath();
+      ctx.fill();
+    };
+
     const draw = (): void => {
       const dpr = window.devicePixelRatio || 1;
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
-      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
+      if (width <= 0 || height <= 0) return;
+      if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = tk.surface;
+      ctx.fillRect(0, 0, width, height);
 
-      const padL = 12;
-      const padR = 12;
+      const padL = 16;
+      const padR = 16;
       const plotW = width - padL - padR;
       const toX = (v: number) => padL + ((v - DOMAIN[0]) / (DOMAIN[1] - DOMAIN[0])) * plotW;
 
+      const blockH = height / 2;
       const panels = [
-        { p: classical, label: 'Classical PSO particle', color: '#57b487', y: 14 },
-        { p: quantum, label: 'Quantum-behaved particle', color: '#5b93e6', y: height / 2 + 6 },
+        {
+          p: classical,
+          label: 'Classical PSO particle',
+          note: 'velocity-clamped',
+          colour: tk.classical,
+          top: 4,
+        },
+        {
+          p: quantum,
+          label: 'Quantum-behaved particle',
+          note: 'unbounded support',
+          colour: tk.quantum,
+          top: blockH + 2,
+        },
       ];
-      const panelH = height / 2 - 30;
 
       for (const panel of panels) {
-        const baseline = panel.y + panelH;
+        const labelBase = panel.top + 12;
+        const plotTop = panel.top + 24;
+        const baseline = panel.top + blockH - 30;
+        const isTop = panel === panels[0];
 
-        ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
-        ctx.fillStyle = '#94a1b2';
+        // --- panel heading -------------------------------------------------
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = `700 9px ${tk.display}`;
+        setTracking(ctx, '0.13em');
+        ctx.fillStyle = tk.label;
         ctx.textAlign = 'left';
-        ctx.fillText(panel.label, padL, panel.y - 2);
+        ctx.fillText(panel.label.toUpperCase(), padL, labelBase);
+        const labelW = ctx.measureText(panel.label.toUpperCase()).width;
+        setTracking(ctx, '0em');
+        ctx.font = `9px ${tk.mono}`;
+        ctx.fillStyle = tk.dim;
+        ctx.fillText(panel.note, padL + labelW + 9, labelBase);
 
-        // Attractor references.
-        for (const [value, label, colour] of [
-          [PBEST, 'personal best', '#6b7889'],
-          [GBEST, 'swarm best', '#c9a63f'],
-        ] as [number, string, string][]) {
+        // How much of the domain the particle has ever reached.
+        const visited = panel.p.history.reduce((a, b) => a + (b > 0 ? 1 : 0), 0);
+        ctx.font = `10px ${tk.mono}`;
+        ctx.fillStyle = tk.dim;
+        ctx.textAlign = 'right';
+        ctx.fillText(
+          `${((100 * visited) / BINS).toFixed(0)} % of domain visited / ${steps} steps`,
+          width - padR,
+          labelBase,
+        );
+
+        // --- attractor references, distinguished by shape ------------------
+        const refs: [number, string, string, boolean][] = [
+          [PBEST, 'personal = mean best', tk.meanBest, true],
+          [GBEST, 'swarm best', tk.swarmBest, false],
+        ];
+        for (const [value, text, colour, dashed] of refs) {
+          const x = toX(value);
           ctx.strokeStyle = colour;
-          ctx.setLineDash([3, 3]);
           ctx.lineWidth = 1;
+          ctx.setLineDash(dashed ? [3, 3] : []);
           ctx.beginPath();
-          ctx.moveTo(toX(value), panel.y + 2);
-          ctx.lineTo(toX(value), baseline);
+          ctx.moveTo(Math.round(x) + 0.5, plotTop + 6);
+          ctx.lineTo(Math.round(x) + 0.5, baseline);
           ctx.stroke();
           ctx.setLineDash([]);
-          if (panel === panels[0]) {
+          if (dashed) square(x, plotTop, 7, colour);
+          else triangle(x, plotTop, 9, colour);
+          if (isTop) {
+            ctx.font = `600 9px ${tk.display}`;
+            setTracking(ctx, '0.1em');
             ctx.fillStyle = colour;
-            ctx.textAlign = 'center';
-            ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-            ctx.fillText(label, toX(value), panel.y + 11);
+            ctx.textAlign = dashed ? 'right' : 'left';
+            ctx.fillText(text.toUpperCase(), x + (dashed ? -8 : 9), plotTop + 3);
+            setTracking(ctx, '0em');
           }
         }
 
-        // Histogram of visited positions, normalised to the tallest bin so the
-        // shape is comparable between the two panels.
+        // --- histogram of visited positions --------------------------------
+        // Normalised to the tallest bin so the shape is comparable between the
+        // two panels; the interesting difference is width, not height.
         const max = Math.max(1, ...panel.p.history);
         const binW = plotW / BINS;
+        const span = baseline - plotTop - 12;
+        ctx.fillStyle = panel.colour;
         for (let i = 0; i < BINS; i += 1) {
-          const h = (panel.p.history[i] / max) * (panelH - 16);
+          const h = (panel.p.history[i] / max) * span;
           if (h <= 0) continue;
-          ctx.fillStyle = panel.color;
-          ctx.globalAlpha = 0.42;
-          ctx.fillRect(padL + i * binW, baseline - h, Math.max(binW - 0.6, 0.8), h);
-          ctx.globalAlpha = 1;
+          // A bin that has been touched at all must be visible: the tails are
+          // the whole argument, and a half-pixel bar would erase them.
+          ctx.fillRect(padL + i * binW, baseline - Math.max(h, 1.5), Math.max(binW - 0.7, 0.9), Math.max(h, 1.5));
         }
 
-        // Axis and the particle's current position.
-        ctx.strokeStyle = '#35404e';
+        // --- axis, ticks and the particle ----------------------------------
+        ctx.strokeStyle = tk.axis;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(padL, baseline + 0.5);
         ctx.lineTo(width - padR, baseline + 0.5);
         ctx.stroke();
 
-        ctx.fillStyle = panel.color;
-        ctx.beginPath();
-        ctx.arc(toX(panel.p.x), baseline - 5, 4, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.font = `9px ${tk.mono}`;
+        ctx.fillStyle = tk.dim;
+        for (const t of [-1, -0.5, 0, 0.5, 1]) {
+          const x = Math.round(toX(t)) + 0.5;
+          ctx.strokeStyle = tk.axis;
+          ctx.beginPath();
+          ctx.moveTo(x, baseline + 1);
+          ctx.lineTo(x, baseline + 4);
+          ctx.stroke();
+          ctx.textAlign = t === DOMAIN[0] ? 'left' : t === DOMAIN[1] ? 'right' : 'center';
+          ctx.fillText(t === 0 ? '0' : t.toFixed(1), x, baseline + 14);
+        }
 
-        // How much of the domain the particle has ever reached.
-        const visited = panel.p.history.reduce((a, b) => a + (b > 0 ? 1 : 0), 0);
-        ctx.fillStyle = '#6b7889';
-        ctx.font = '10px ui-monospace, SFMono-Regular, monospace';
-        ctx.textAlign = 'right';
-        ctx.fillText(
-          `${((100 * visited) / BINS).toFixed(0)} % of the domain reached in ${steps} steps`,
-          width - padR,
-          panel.y - 2,
-        );
+        // The particle itself, ringed in the panel colour so it stays legible
+        // where it sits on top of its own histogram.
+        const px = toX(panel.p.x);
+        ctx.beginPath();
+        ctx.arc(px, baseline - 6, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = panel.colour;
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = tk.panel;
+        ctx.stroke();
       }
+
+      // The rule between the two panels, so they read as a comparison.
+      ctx.strokeStyle = tk.grid;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padL, Math.round(blockH) + 0.5);
+      ctx.lineTo(width - padR, Math.round(blockH) + 0.5);
+      ctx.stroke();
     };
 
     const loop = () => {
@@ -216,14 +383,31 @@ export function SamplingDemo() {
       frame = requestAnimationFrame(loop);
     };
 
-    if (running) {
+    if (reduced) {
+      // Motion is suppressed: run the simulation to its settled state and draw
+      // the result once, so the reader still sees the thing being argued.
+      for (let i = 0; i < STATIC_STEPS; i += 1) {
+        stepClassical();
+        stepQuantum();
+        steps += 1;
+      }
+      draw();
+    } else if (running) {
       frame = requestAnimationFrame(loop);
     } else {
       draw();
     }
 
-    return () => cancelAnimationFrame(frame);
-  }, [running, resetKey]);
+    // Keep the backing store matched to the element when the column resizes.
+    const observer =
+      typeof ResizeObserver === 'function' ? new ResizeObserver(() => draw()) : null;
+    observer?.observe(canvas);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [running, resetKey, reduced]);
 
   return (
     <div>
@@ -231,29 +415,35 @@ export function SamplingDemo() {
         ref={canvasRef}
         style={{
           width: '100%',
-          height: 288,
+          height: 300,
           display: 'block',
-          background: 'var(--bg)',
+          background: 'var(--panel-alt)',
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius)',
         }}
       />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
-        <button type="button" className="btn small" onClick={() => setRunning((r) => !r)}>
-          {running ? 'Pause' : 'Resume'}
-        </button>
-        <button
-          type="button"
-          className="btn small"
-          onClick={() => setResetKey((k) => k + 1)}
-        >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+        {!reduced && (
+          <button type="button" className="btn small" onClick={() => setRunning((r) => !r)}>
+            {running ? 'Pause' : 'Resume'}
+          </button>
+        )}
+        <button type="button" className="btn small" onClick={() => setResetKey((k) => k + 1)}>
           Restart
         </button>
         <label
           style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 auto', fontSize: 12 }}
         >
-          <span style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-            contraction–expansion β = {beta.toFixed(2)}
+          <span
+            style={{
+              color: 'var(--text-dim)',
+              whiteSpace: 'nowrap',
+              fontFamily: 'var(--mono)',
+              fontVariantNumeric: 'tabular-nums',
+              fontSize: 11.5,
+            }}
+          >
+            β = {beta.toFixed(2)}
           </span>
           <input
             type="range"
@@ -262,15 +452,23 @@ export function SamplingDemo() {
             step={0.05}
             value={beta}
             onChange={(e) => setBeta(Number(e.target.value))}
+            aria-label="contraction-expansion coefficient beta"
           />
         </label>
       </div>
-      <p style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 8, lineHeight: 1.55 }}>
+      <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 9, lineHeight: 1.6 }}>
         Both particles are stepped from the same seeded generator with the same
         personal and swarm bests. Raising β widens the sampling distribution and
         the quantum particle explores further; Sun et al.'s stability analysis
         puts the convergence threshold near β = 1.78, and above roughly that
         value the particle stops settling at all.
+        {reduced && (
+          <>
+            {' '}
+            Motion is switched off because this system asks for reduced motion,
+            so the figure shows the state after {STATIC_STEPS} steps.
+          </>
+        )}
       </p>
     </div>
   );

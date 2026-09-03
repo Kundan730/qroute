@@ -8,9 +8,18 @@
  * insists on is that the backend's reachability is visible at all times: a demo
  * that silently shows stale numbers when the API has died is worse than one
  * that says so.
+ *
+ * The status chip lives on the navy bar, which constrains what it may be
+ * coloured. A crimson or teal glyph on navy does not clear the contrast a
+ * meaningful graphic needs, so the three states are told apart by the *shape*
+ * of the mark and by the chip's treatment: online and connecting are outlined
+ * chips with pale marks, while offline inverts to a solid crimson chip with
+ * white type - the one thing on the bar that cannot be mistaken for chrome.
  */
 
+import type { CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
+import { Mark } from './components/ui';
 import { BenchmarkPage } from './pages/BenchmarkPage';
 import { MapPage } from './pages/MapPage';
 import { MethodPage } from './pages/MethodPage';
@@ -27,6 +36,21 @@ const PAGES: { id: PageId; label: string }[] = [
   { id: 'benchmark', label: 'Benchmark' },
   { id: 'method', label: 'Method' },
 ];
+
+/** Shared geometry for the two small chips at the right of the top bar. */
+const CHIP: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '3px 9px',
+  borderRadius: 'var(--radius)',
+  fontFamily: 'var(--display)',
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  whiteSpace: 'nowrap',
+};
 
 export default function App() {
   const [page, setPage] = useState<PageId>('map');
@@ -59,14 +83,19 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [backend, recheck]);
 
-  const statusTone =
-    backend === 'online' ? 'var(--ok)' : backend === 'offline' ? 'var(--bad)' : 'var(--warn)';
+  const offline = backend === 'offline';
+
+  const statusChip: CSSProperties = offline
+    ? { ...CHIP, background: 'var(--bad)', color: 'var(--panel)', fontWeight: 700 }
+    : { ...CHIP, border: '1px solid var(--navy-400)', color: 'var(--navy-050)' };
+  // Mark colours are chosen against the navy bar, not against a white panel.
+  const markColor = offline
+    ? 'var(--panel)'
+    : backend === 'online'
+      ? 'var(--cong-free)'
+      : 'var(--warn)';
   const statusLabel =
-    backend === 'online'
-      ? 'backend online'
-      : backend === 'offline'
-        ? 'backend unavailable'
-        : 'connecting…';
+    backend === 'online' ? 'backend online' : offline ? 'backend offline' : 'connecting…';
 
   return (
     <div className="app">
@@ -93,14 +122,26 @@ export default function App() {
 
         <div className="topbar-right">
           {streaming && (
-            <span style={{ color: 'var(--accent-text)' }}>solver running</span>
+            <span style={{ ...CHIP, border: '1px solid var(--navy-400)', color: 'var(--accent-dim)' }}>
+              <Mark shape="disc" size={6} />
+              solver running
+            </span>
           )}
-          {health?.version && <span className="mono">v{health.version}</span>}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: statusTone }}>
-            <span className="dot" />
+          {health?.version && (
+            <span className="mono" style={{ color: 'var(--navy-100)' }}>
+              v{health.version}
+            </span>
+          )}
+          <span style={statusChip} role="status">
+            <span style={{ color: markColor, display: 'inline-flex' }}>
+              <Mark
+                shape={backend === 'online' ? 'disc' : offline ? 'square' : 'ring'}
+                size={6}
+              />
+            </span>
             {statusLabel}
           </span>
-          {backend === 'offline' && (
+          {offline && (
             <button type="button" className="btn small" onClick={() => void bootstrap()}>
               Retry
             </button>
@@ -108,19 +149,38 @@ export default function App() {
         </div>
       </header>
 
-      {backend === 'offline' && (
+      {offline && (
         <div
+          role="alert"
           style={{
-            padding: '7px 16px',
-            background: '#2a1c1b',
-            borderBottom: '1px solid #6b3a36',
-            color: '#e0b5ae',
+            display: 'flex',
+            alignItems: 'baseline',
+            flexWrap: 'wrap',
+            gap: '4px 12px',
+            padding: '8px 18px',
+            background: 'var(--bad)',
+            color: 'var(--panel)',
             fontSize: 12,
+            lineHeight: 1.5,
           }}
         >
-          Cannot reach the API{error ? ` — ${error}` : ''}. Start it with{' '}
-          <code>python -m qroute.api.app</code>; this page retries
-          every few seconds.
+          <span
+            style={{
+              fontFamily: 'var(--display)',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Backend offline
+          </span>
+          <span>
+            Cannot reach the API{error ? ` — ${error}` : ''}. Every figure on the
+            other pages is either blank or stale. Start it with{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>python -m qroute.api.app</code>;
+            this page retries every few seconds.
+          </span>
         </div>
       )}
 

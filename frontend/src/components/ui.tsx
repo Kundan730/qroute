@@ -4,9 +4,36 @@
  * They exist so that a panel, a labelled field, a statistic and a status badge
  * look identical on all four pages without every page importing the same class
  * names by hand. Nothing here holds state or talks to the network.
+ *
+ * Colour. Almost nothing here names a colour: the class names are styled by
+ * `styles/global.css`, which owns the palette. The exceptions are the few
+ * places where a value has to be computed at render time - a tone on a
+ * statistic, the fill of a meter - and those read a design token through
+ * `var(...)` rather than carrying a literal.
+ *
+ * State is encoded in form as well as in hue. A badge can carry a mark whose
+ * *shape* says what it means - a filled disc for an affirmative result, a
+ * hollow ring for a borderline one, a filled square for a negative one - so
+ * that the interface survives a projector, a greyscale print of the report, and
+ * a reader who cannot separate red from green.
  */
 
 import type { CSSProperties, ReactNode } from 'react';
+
+export type Tone = 'ok' | 'warn' | 'bad';
+
+/** The shape of a status mark. Chosen so the three read apart in greyscale. */
+export type MarkShape = 'disc' | 'ring' | 'square';
+
+const TONE_COLOR: Record<Tone, string> = {
+  ok: 'var(--ok)',
+  warn: 'var(--warn)',
+  bad: 'var(--bad)',
+};
+
+export function toneColor(tone: Tone | undefined): string | undefined {
+  return tone ? TONE_COLOR[tone] : undefined;
+}
 
 export function Panel({
   title,
@@ -61,16 +88,18 @@ export function Stat({
   unit,
   sub,
   tone,
+  title,
 }: {
   label: string;
   value: ReactNode;
   unit?: string;
   sub?: ReactNode;
-  tone?: 'ok' | 'warn' | 'bad';
+  tone?: Tone;
+  title?: string;
 }) {
-  const color = tone === 'ok' ? 'var(--ok)' : tone === 'warn' ? 'var(--warn)' : tone === 'bad' ? 'var(--bad)' : undefined;
+  const color = toneColor(tone);
   return (
-    <div className="stat">
+    <div className="stat" title={title}>
       <div className="stat-label">{label}</div>
       <div className="stat-value" style={color ? { color } : undefined}>
         {value}
@@ -89,19 +118,135 @@ export function StatGrid({ columns, children }: { columns: number; children: Rea
   );
 }
 
-export function Badge({
-  tone,
-  children,
+/**
+ * A small status mark drawn in `currentColor`, so it takes the colour of
+ * whatever it sits inside. The shape carries the meaning on its own: hue is a
+ * second, redundant channel rather than the only one.
+ */
+export function Mark({
+  shape = 'disc',
+  size = 7,
+  style,
 }: {
-  tone?: 'ok' | 'warn' | 'bad';
-  children: ReactNode;
+  shape?: MarkShape;
+  size?: number;
+  style?: CSSProperties;
 }) {
-  return <span className={`badge${tone ? ` ${tone}` : ''}`}>{children}</span>;
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        flex: '0 0 auto',
+        width: size,
+        height: size,
+        borderRadius: shape === 'square' ? 1 : '50%',
+        background: shape === 'ring' ? 'transparent' : 'currentColor',
+        border: shape === 'ring' ? '1.5px solid currentColor' : undefined,
+        ...style,
+      }}
+    />
+  );
 }
 
-export function KeyValue({ label, value }: { label: string; value: ReactNode }) {
+export function Badge({
+  tone,
+  mark,
+  title,
+  children,
+}: {
+  tone?: Tone;
+  mark?: MarkShape;
+  title?: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="kv">
+    <span className={`badge${tone ? ` ${tone}` : ''}`} title={title}>
+      {mark && <Mark shape={mark} size={6} />}
+      {children}
+    </span>
+  );
+}
+
+/**
+ * A colour key for a series, outlined so that the shape is visible whatever
+ * the fill does - a pale series colour on a white panel would otherwise fall
+ * below the contrast a meaningful graphic has to reach.
+ */
+export function Swatch({ color, size = 8 }: { color: string; size?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        flex: '0 0 auto',
+        width: size,
+        height: size,
+        background: color,
+        border: '1px solid var(--navy-300)',
+        borderRadius: 1,
+      }}
+    />
+  );
+}
+
+/**
+ * A determinate bar. Used for elapsed time against a budget and for a mean
+ * rank against the number of algorithms - never as decoration, always as a
+ * second reading of a number printed next to it.
+ */
+export function Meter({
+  value,
+  tone,
+  height = 4,
+  title,
+  animated = false,
+}: {
+  /** Fraction in `[0, 1]`; values outside are clamped. */
+  value: number;
+  tone?: Tone;
+  height?: number;
+  title?: string;
+  animated?: boolean;
+}) {
+  const fraction = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+  return (
+    <div
+      title={title}
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(fraction * 100)}
+      style={{
+        height,
+        background: 'var(--border)',
+        borderRadius: 1,
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          width: `${fraction * 100}%`,
+          height: '100%',
+          background: toneColor(tone) ?? 'var(--accent)',
+          transition: animated ? 'width 220ms linear' : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
+export function KeyValue({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: ReactNode;
+  title?: string;
+}) {
+  return (
+    <div className="kv" title={title}>
       <span>{label}</span>
       <span>{value}</span>
     </div>
@@ -120,6 +265,38 @@ export function Notice({
 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
+}
+
+/**
+ * The explanatory line that sits under a chart or a table. Deliberately set in
+ * `--text-dim` rather than `--text-faint`: it is prose a judge is expected to
+ * read, and it has to clear 4.5:1 on the panel behind it.
+ */
+export function Note({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  return (
+    <div style={{ fontSize: 11, lineHeight: 1.55, color: 'var(--text-dim)', ...style }}>
+      {children}
+    </div>
+  );
+}
+
+/** The small uppercase label that titles a group inside a panel. */
+export function Caption({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  return (
+    <div
+      style={{
+        fontFamily: 'var(--display)',
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.13em',
+        textTransform: 'uppercase',
+        color: 'var(--navy-300)',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function RailSection({ title, children }: { title: string; children: ReactNode }) {

@@ -47,7 +47,7 @@ const FALLBACK: Record<string, string> = {
   '--text-faint': '#868da0',
   '--navy': '#1c273b',
   '--navy-300': '#686f7c',
-  '--accent': '#3b5bd9',
+  '--accent': '#1c273b',
   '--violet': '#5b4fcf',
   '--radius': '3px',
   '--shadow-float': '0 1px 2px rgba(28, 39, 59, 0.08), 0 8px 24px rgba(28, 39, 59, 0.1)',
@@ -140,16 +140,35 @@ function tooltipLabelStyle() {
   };
 }
 
-/** Values are digits, so they are mono and tabular. */
+/**
+ * Values are digits, so they are mono and tabular. No `color`: recharts then
+ * paints each value in its own series hue, which keys the tooltip to the lines
+ * without needing a swatch. Every series colour used here clears 4.5:1 on the
+ * white panel (accent 5.7:1, navy-300 5.1:1, violet 6.1:1).
+ */
 function tooltipItemStyle() {
   return {
-    color: token('--text'),
     fontFamily: token('--mono'),
     fontSize: 11,
     fontVariantNumeric: 'tabular-nums' as const,
     padding: 0,
   };
 }
+
+/**
+ * Legend voice, kept here so every chart in the platform agrees. Nothing in
+ * this file renders a `<Legend>` - both charts name their series in the tooltip
+ * instead - but a chart elsewhere that needs one should take these values.
+ */
+const LEGEND = {
+  get color(): string {
+    return token('--text-dim');
+  },
+  get fontFamily(): string {
+    return token('--font');
+  },
+  fontSize: 11,
+};
 
 const GRID_DASH = '2 4';
 
@@ -359,4 +378,4 @@ export function DiversityChart({ ticks, height = 150 }: { ticks: RunTick[]; heig
   );
 }
 
-export { AXIS as CHART_AXIS, TOOLTIP_STYLE as CHART_TOOLTIP };
+export { AXIS as CHART_AXIS, TOOLTIP_STYLE as CHART_TOOLTIP, LEGEND as CHART_LEGEND };

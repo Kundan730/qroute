@@ -6,15 +6,17 @@
  * `qroute.traffic.bpr.CONGESTION_BANDS` exactly, so the map legend and the
  * backend's own band histogram always agree.
  *
- * The ramp is a temperature rather than a traffic light. Green and gold are
- * held out of the product's palette, and the substitute runs steel blue for
- * free-flowing, through cornflower and violet, into rose and crimson where a
- * corridor is failing. It is monotonic in perceived heat, it survives a
- * projector, and it stays readable for the roughly one man in twelve who cannot
- * separate red from green - which the conventional scheme does not.
+ * The ramp is a temperature rather than a traffic light. Green, gold and blue
+ * are all held out of the product's palette, so it runs from grey through slate
+ * and violet into rose and crimson. Saturation and perceived heat both rise
+ * together, which means the ordering survives greyscale printing, and a
+ * free-flowing road ends up the quietest thing on the map rather than a bright
+ * line competing for attention. It also stays readable for the roughly one man
+ * in twelve who cannot separate red from green, which the conventional scheme
+ * does not.
  *
  * The vehicle palette is categorical rather than ordered, and every hue is dark
- * enough to hold its own over a pale basemap or satellite imagery.
+ * enough to hold its own over a pale basemap or over satellite imagery.
  */
 
 import type { CongestionBand } from '../api/types';
@@ -29,9 +31,9 @@ export interface Band {
 
 /** Band edges copied from `qroute.traffic.bpr.CONGESTION_BANDS`. */
 export const CONGESTION_BANDS: Band[] = [
-  { name: 'free', max: 0.1, color: '#5b8fb9', label: 'Free flow' },
-  { name: 'light', max: 0.35, color: '#5c6fc4', label: 'Light' },
-  { name: 'moderate', max: 0.75, color: '#7a5bb5', label: 'Moderate' },
+  { name: 'free', max: 0.1, color: '#a6adb9', label: 'Free flow' },
+  { name: 'light', max: 0.35, color: '#7d8698', label: 'Light' },
+  { name: 'moderate', max: 0.75, color: '#8e6aa8', label: 'Moderate' },
   { name: 'heavy', max: 1.5, color: '#a8497e', label: 'Heavy' },
   { name: 'severe', max: Number.POSITIVE_INFINITY, color: '#b5364a', label: 'Severe' },
 ];
@@ -63,15 +65,15 @@ export function congestionColor(level: number): string {
  */
 export const VEHICLE_COLORS: string[] = [
   '#1c273b',
-  '#3b5bd9',
   '#a8436a',
-  '#0f7a86',
-  '#5b4fcf',
+  '#4f5b6e',
+  '#8e4a2f',
+  '#6f4a9c',
   '#b5364a',
-  '#2f6f8f',
-  '#8a3fa8',
-  '#42607e',
+  '#2f5d63',
   '#7a3f5c',
+  '#3f4a5c',
+  '#93553a',
 ];
 
 export function vehicleColor(index: number): string {
@@ -80,19 +82,20 @@ export function vehicleColor(index: number): string {
 
 /** Fixed colours per algorithm so a series keeps its hue across every chart. */
 const ALGORITHM_COLORS: Record<string, string> = {
-  // The two proposed engines take the brand navy and the accent, so they are
-  // the two series a reader picks out first on every chart.
-  qpso: '#3b5bd9',
-  qiea: '#1c273b',
-  qrk: '#42607e',
-  pso: '#0f7a86',
-  ga: '#a8436a',
-  sa: '#8a3fa8',
-  aco: '#5b4fcf',
-  random: '#8e939d',
-  ortools: '#2f6f8f',
+  // The two proposed engines take the brand navy and the rose, so they are the
+  // two series a reader picks out first on every chart; the classical field is
+  // held in slates and browns behind them.
+  qpso: '#1c273b',
+  qiea: '#a8436a',
+  qrk: '#7a3f5c',
+  pso: '#4f5b6e',
+  ga: '#8e4a2f',
+  sa: '#6f4a9c',
+  aco: '#2f5d63',
+  random: '#a6adb9',
+  ortools: '#93553a',
   pyvrp: '#b5364a',
-  cpsat: '#7a3f5c',
+  cpsat: '#3f4a5c',
 };
 
 export function algorithmColor(name: string): string {

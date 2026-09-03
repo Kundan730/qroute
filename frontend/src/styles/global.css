@@ -7,17 +7,20 @@
  *
  * Palette. A navy spine (#1C273B and its ramp) carries structure - the top bar,
  * the labels, the rules - against a paper-white working surface on a pale
- * blue-grey ground. One accent, a cornflower blue, marks the single primary
- * action in any view. Nothing else in the chrome is saturated, so when the map
- * shows a congested corridor or a vehicle route, that colour is the only
- * competition for the eye.
+ * blue-grey ground. The chrome has no coloured accent at all: the primary
+ * button, the focus ring, a checked box and a slider are all carried by that
+ * same navy over graphite and grey. Colour is reserved entirely for the map and
+ * the charts, where it is information rather than decoration, so nothing in the
+ * furniture competes with it.
  *
- * The congestion ramp deliberately avoids the conventional green-amber-red.
- * Green and gold are reserved out of the palette, and the substitute reads as a
- * temperature rather than a traffic light: steel blue for free-flowing, through
- * cornflower and violet, into rose and crimson where a corridor is failing.
- * Monotonic in perceived heat, and legible for the roughly one man in twelve
- * who cannot separate red from green.
+ * The congestion ramp avoids the conventional green-amber-red. Green, gold and
+ * blue are all held out of the palette, and the substitute runs from grey,
+ * through slate and violet, into rose and crimson. It is monotonic in both
+ * saturation and perceived heat, so intensity reads even in greyscale, and a
+ * free-flowing road is the quietest thing on the map rather than a bright green
+ * line demanding attention. It is also legible for the roughly one man in
+ * twelve who cannot separate red from green, which the conventional scheme is
+ * not.
  *
  * Type. Urbanist for display and for the small uppercase labels that organise
  * the rails, DM Sans for everything read as prose, DM Mono wherever digits must
@@ -54,14 +57,20 @@
   --text-dim: #5a6376;
   --text-faint: #868da0;
 
-  /* --- accent: cornflower ---------------------------------------------- */
-  --accent: #3b5bd9;
-  --accent-deep: #2a44ac;
-  --accent-dim: #c9d3f6;
-  --accent-soft: #edf1fd;
-  --accent-text: #2a44ac;
+  /* --- accent: the navy itself ------------------------------------------
+     There is no coloured accent in the chrome. Every control - the primary
+     button, the focus ring, a checked box, a slider - is carried by the same
+     navy that structures the page, with graphite and grey underneath it. The
+     product is an instrument read for hours, and a saturated accent on every
+     control competes with the map, which is the one surface where colour is
+     information rather than decoration. */
+  --accent: #1c273b;
+  --accent-deep: #0e141e;
+  --accent-dim: #c2c8d4;
+  --accent-soft: #eceef2;
+  --accent-text: #1c273b;
 
-  /* --- secondary hues, used sparingly ---------------------------------- */
+  /* --- secondary hues, reserved for the map and the charts -------------- */
   --violet: #5b4fcf;
   --rose: #a8436a;
 
@@ -71,10 +80,12 @@
   --bad: #b5364a;
 
   /* Congestion ramp, matched band for band to
-     qroute.traffic.bpr.CONGESTION_BANDS. Cool to hot, no green, no gold. */
-  --cong-free: #5b8fb9;
-  --cong-light: #5c6fc4;
-  --cong-moderate: #7a5bb5;
+     qroute.traffic.bpr.CONGESTION_BANDS. Grey through to crimson: no green, no
+     gold, no blue. Free-flowing roads are deliberately the quietest thing on
+     the map, because a road behaving normally is not news. */
+  --cong-free: #a6adb9;
+  --cong-light: #7d8698;
+  --cong-moderate: #8e6aa8;
   --cong-heavy: #a8497e;
   --cong-severe: #b5364a;
 
@@ -148,13 +159,14 @@ p {
 }
 
 a {
-  color: var(--accent-text);
+  color: var(--text);
   text-decoration: none;
-  border-bottom: 1px solid var(--accent-dim);
+  border-bottom: 1px solid var(--border-strong);
 }
 
 a:hover {
-  border-bottom-color: var(--accent);
+  color: var(--navy-800);
+  border-bottom-color: var(--navy);
 }
 
 .mono {
@@ -255,7 +267,9 @@ a:hover {
 
 .nav button[aria-current='page'] {
   color: #ffffff;
-  border-bottom-color: var(--accent);
+  /* On the navy bar the accent would disappear, so the current tab is marked
+     by the surface colour of the page below it. */
+  border-bottom-color: #ffffff;
 }
 
 .topbar-right {
@@ -384,26 +398,28 @@ input[type='number']:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-color: var(--navy-400);
+  box-shadow: 0 0 0 3px rgba(28, 39, 59, 0.1);
 }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 a:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--navy);
   outline-offset: 2px;
 }
 
 input[type='range'] {
   width: 100%;
-  accent-color: var(--accent);
+  /* accent-color drives the filled track and the thumb; left to the browser
+     it is a bright system blue on every platform. */
+  accent-color: var(--navy);
   cursor: pointer;
 }
 
 input[type='checkbox'] {
-  accent-color: var(--accent);
+  accent-color: var(--navy);
   cursor: pointer;
 }
 
@@ -610,7 +626,7 @@ table.grid td:first-child {
 }
 
 table.grid tbody tr:hover td {
-  background: var(--accent-soft);
+  background: var(--bg-raised);
 }
 
 td.num {
@@ -625,9 +641,9 @@ td.num {
 .notice {
   padding: 9px 11px;
   border-radius: var(--radius);
-  border: 1px solid var(--accent-dim);
-  border-left: 2px solid var(--accent);
-  background: var(--accent-soft);
+  border: 1px solid var(--border-strong);
+  border-left: 2px solid var(--navy-400);
+  background: var(--bg-raised);
   font-size: 12px;
   color: var(--text-dim);
   line-height: 1.5;
@@ -688,7 +704,7 @@ td.num {
 
 .leaflet-control-zoom a:hover {
   background: var(--bg-raised);
-  color: var(--accent-text);
+  color: var(--navy);
 }
 
 .leaflet-control-attribution {

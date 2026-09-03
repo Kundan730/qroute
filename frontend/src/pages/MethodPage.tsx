@@ -5,11 +5,16 @@
  * The tone here is set deliberately. "Quantum-behaved" names a sampling rule
  * borrowed from the analogy of a particle in a delta potential well; it does
  * not mean quantum hardware, quantum speed-up, or anything running on a qubit,
- * and saying so plainly is more useful to a panel than the alternative. Every
- * equation on this page corresponds to a specific line of
- * `qroute/algorithms/qpso.py`, and the parameter-study result quoted at the end
- * is the one the study actually produced, including the part that does not
- * flatter the method.
+ * and saying so plainly is more useful to a panel than the alternative. That
+ * statement is therefore the first thing on the page, across the full width,
+ * rather than a caveat some paragraphs down.
+ *
+ * Every equation on this page corresponds to a specific line of
+ * `qroute/algorithms/qpso.py`, and each symbol in it is defined in a
+ * description list beside the rule rather than in a paragraph of prose, because
+ * a reader checking an implementation looks symbols up rather than reading
+ * sentences. The parameter-study result quoted at the end is the one the study
+ * actually produced, including the part that does not flatter the method.
  */
 
 import { Eq, Op, T, V } from '../components/method/Equation';
@@ -19,34 +24,118 @@ import { Panel } from '../components/ui';
 const PROSE: React.CSSProperties = {
   maxWidth: 780,
   color: 'var(--text-dim)',
-  fontSize: 13.5,
+  fontSize: 13,
   lineHeight: 1.68,
 };
+
+const LABEL: React.CSSProperties = {
+  fontFamily: 'var(--display)',
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: '0.13em',
+  textTransform: 'uppercase',
+  color: 'var(--navy-300)',
+  marginBottom: 5,
+};
+
+const STRONG: React.CSSProperties = { color: 'var(--text)', fontWeight: 600 };
+
+/** One cell of the positioning strip. Hairline-separated, no tint, no icon. */
+function Claim({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ background: 'var(--panel)', padding: '11px 13px' }}>
+      <div style={LABEL}>{label}</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-dim)' }}>{children}</div>
+    </div>
+  );
+}
 
 export function MethodPage() {
   return (
     <div className="page-scroll">
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          gap: 12,
+          alignItems: 'start',
+        }}
+      >
+        {/* ------------------------------------------- positioning, full width */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Panel title="Positioning">
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(240px, 0.95fr) minmax(0, 2fr)',
+                gap: 22,
+                alignItems: 'start',
+              }}
+            >
+              <div>
+                <h2
+                  style={{
+                    fontFamily: 'var(--display)',
+                    fontSize: 17,
+                    fontWeight: 600,
+                    letterSpacing: '-0.015em',
+                    color: 'var(--text)',
+                    marginBottom: 7,
+                  }}
+                >
+                  Quantum-behaved, not quantum hardware
+                </h2>
+                <p style={{ ...PROSE, margin: 0 }}>
+                  The optimiser is quantum-behaved particle swarm optimisation
+                  (QPSO), introduced by Sun, Feng and Xu in 2004. The word
+                  quantum describes where the update rule comes from — the
+                  probability density of a particle bound in a delta potential
+                  well — and nothing else.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: 1,
+                  background: 'var(--border)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  overflow: 'hidden',
+                }}
+              >
+                <Claim label="What runs">
+                  A <span style={STRONG}>classical simulation</span> on an
+                  ordinary CPU, in Python and NumPy. Anyone can read it, run it
+                  and reproduce the numbers on this site from the repository.
+                </Claim>
+                <Claim label="What is not used">
+                  <span style={STRONG}>No quantum hardware</span>, no qubits, no
+                  quantum simulator, no annealer. Nothing here needs a device
+                  that does not sit on a desk.
+                </Claim>
+                <Claim label="What is not claimed">
+                  <span style={STRONG}>No quantum speed-up.</span> The claim is a
+                  specific, testable property of the sampling distribution, set
+                  out below and measured in the figure on the right.
+                </Claim>
+              </div>
+            </div>
+          </Panel>
+        </div>
+
         {/* ------------------------------------------------------ left column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Panel title="What this method is, and what it is not">
+          <Panel title="What the model computes exactly">
             <div style={PROSE}>
               <p>
-                The optimiser is <strong style={{ color: 'var(--text)' }}>quantum-behaved
-                particle swarm optimisation</strong> (QPSO), introduced by Sun,
-                Feng and Xu in 2004. The word quantum describes where the update
-                rule comes from — the probability density of a particle bound in
-                a delta potential well — and nothing else. This runs on an
-                ordinary CPU, it uses no quantum hardware, and it claims no
-                quantum speed-up. What it does claim is a specific and testable
-                property of its sampling distribution, set out below.
-              </p>
-              <p>
-                The routing model itself is classical and exact where it can be.
+                The routing model is classical and exact where it can be.
                 Shortest paths between stops are computed with Dijkstra's
                 algorithm, in polynomial time, with no metaheuristic involved.
                 The hard part — deciding which vehicle serves which customers and
-                in what order — is the part the swarm searches.
+                in what order — is the part the swarm searches, and that part is
+                a heuristic making no optimality claim.
               </p>
             </div>
           </Panel>
@@ -60,12 +149,49 @@ export function MethodPage() {
               </p>
             </div>
             <Eq
+              defs={[
+                {
+                  sym: (
+                    <>
+                      <V sub="id">x</V>, <V sub="id">v</V>
+                    </>
+                  ),
+                  desc: 'Position and velocity of particle i in dimension d.',
+                },
+                {
+                  sym: <T>χ</T>,
+                  desc: 'Constriction coefficient, 0.7298 in the standard parameterisation of Clerc and Kennedy.',
+                },
+                {
+                  sym: (
+                    <>
+                      <V sub="1">c</V>, <V sub="2">c</V>
+                    </>
+                  ),
+                  desc: 'Acceleration constants, 2.05 each, the values the constriction factor is derived for.',
+                },
+                {
+                  sym: (
+                    <>
+                      <V sub="1">r</V>, <V sub="2">r</V>
+                    </>
+                  ),
+                  desc: 'Independent uniform draws on (0, 1), redrawn every step and every dimension.',
+                },
+                {
+                  sym: <V sub="id">p</V>,
+                  desc: "The particle's own best position so far.",
+                },
+                {
+                  sym: <V sub="d">g</V>,
+                  desc: 'The best position found by any particle in the swarm.',
+                },
+              ]}
               note={
                 <>
-                  χ is the constriction coefficient (0.7298 in the standard
-                  parameterisation) and <V>r</V><sub>1</sub>, <V>r</V><sub>2</sub>{' '}
-                  are independent uniform draws. Because <V>v</V> is bounded,
-                  so is the region reachable in one step.
+                  The velocity is clamped to a fraction of the domain width, so
+                  the set of positions reachable in one step is bounded. That
+                  bound is the property the figure opposite measures.
                 </>
               }
             >
@@ -108,13 +234,16 @@ export function MethodPage() {
               </p>
             </div>
             <Eq
-              note={
-                <>
-                  φ is drawn independently per particle and per dimension, so the
-                  attractor wanders between the two bests rather than sitting at
-                  their midpoint.
-                </>
-              }
+              defs={[
+                {
+                  sym: <T>φ</T>,
+                  desc: 'Uniform on (0, 1), drawn independently per particle and per dimension, so the attractor wanders between the two bests rather than sitting at their midpoint.',
+                },
+                {
+                  sym: <V sub="id">p</V>,
+                  desc: 'The local attractor: the centre of the well this particle is sampled around on this step.',
+                },
+              ]}
             >
               <T>φ</T>
               <Op>∼</Op>
@@ -143,15 +272,29 @@ export function MethodPage() {
               </p>
             </div>
             <Eq
+              defs={[
+                {
+                  sym: <V>mbest</V>,
+                  desc: 'Mean best position: the componentwise average of all M personal bests.',
+                },
+                { sym: <V>M</V>, desc: 'Swarm size.' },
+                {
+                  sym: <T>β</T>,
+                  desc: "Contraction–expansion coefficient, the algorithm's one critical parameter.",
+                },
+                {
+                  sym: <V>u</V>,
+                  desc: 'Uniform on (0, 1); the sign in front of the term is a fair coin.',
+                },
+              ]}
               note={
                 <>
-                  <V>u</V> is uniform on (0, 1) and the sign is a fair coin. As{' '}
-                  <V>u</V> → 0 the logarithm diverges, so the support of this
+                  As <V>u</V> → 0 the logarithm diverges, so the support of this
                   distribution is the whole real line: at every iteration the
                   particle has non-zero probability of appearing anywhere in the
-                  search space. That is the concrete sense in which QPSO
-                  explores more globally than PSO, and it is what the
-                  illustration to the right measures.
+                  search space. That is the concrete sense in which QPSO explores
+                  more globally than PSO, and it is what the illustration to the
+                  right measures.
                 </>
               }
             >
@@ -183,12 +326,10 @@ export function MethodPage() {
 
             <div style={PROSE}>
               <p>
-                β is the contraction–expansion coefficient and the algorithm's
-                one critical parameter. Sun et al.'s stability analysis shows the
-                swarm converges for β below roughly 1.78. The implementation
-                follows the standard schedule, decreasing β linearly from 1.0 to
-                0.5 across the run; because the sampling width also carries the
-                factor <Op>|</Op>
+                Sun et al.'s stability analysis shows the swarm converges for β
+                below roughly 1.78. The implementation follows the standard
+                schedule, decreasing β linearly from 1.0 to 0.5 across the run;
+                because the sampling width also carries the factor <Op>|</Op>
                 <V sub="d">mbest</V>
                 <Op>−</Op>
                 <V sub="id">x</V>
@@ -203,10 +344,10 @@ export function MethodPage() {
               <p>
                 The update rule above lives in a continuous space, and vehicle
                 routing is a permutation problem. The bridge is a{' '}
-                <strong style={{ color: 'var(--text)' }}>random-key</strong>{' '}
-                encoding: a particle's position is a vector of one real number
-                per customer, decoded by sorting the keys into a giant tour and
-                then splitting that tour optimally into routes.
+                <span style={STRONG}>random-key</span> encoding: a particle's
+                position is a vector of one real number per customer, decoded by
+                sorting the keys into a giant tour and then splitting that tour
+                optimally into routes.
               </p>
               <p>
                 The split is not a heuristic. Given a fixed customer order, the
@@ -245,6 +386,36 @@ export function MethodPage() {
               </p>
             </div>
             <Eq
+              defs={[
+                {
+                  sym: (
+                    <>
+                      <V sub="ij">t</V>, <V sub="ij">d</V>
+                    </>
+                  ),
+                  desc: 'Travel time and distance on the arc from i to j, taken from the road network.',
+                },
+                {
+                  sym: (
+                    <>
+                      <T>c</T>
+                      <Op>(</Op>
+                      <V sub="ij">·</V>
+                      <Op>)</Op>
+                    </>
+                  ),
+                  desc: 'Congestion cost on that arc, from the BPR volume–delay function used by the traffic simulator.',
+                },
+                { sym: <V>K</V>, desc: 'Number of vehicles the solution actually uses.' },
+                {
+                  sym: (
+                    <>
+                      <V sub="time">w</V> …
+                    </>
+                  ),
+                  desc: 'The four weights, set per run and reported with every result so a number can be traced to the objective that produced it.',
+                },
+              ]}
               note={
                 <>
                   Benchmark runs use <V sub="dist">w</V> = 1 and the rest zero,
@@ -298,11 +469,11 @@ export function MethodPage() {
                 second budget per configuration.
               </p>
               <p>
-                <strong style={{ color: 'var(--text)' }}>
+                <span style={STRONG}>
                   Mean gap to the best-known solution across every configuration
                   tried fell in a narrow band, roughly 1.6 % to 2.1 %, with a
                   standard deviation across runs near 1.0.
-                </strong>{' '}
+                </span>{' '}
                 In other words the differences between reasonable parameter
                 settings were smaller than the run-to-run noise, and no setting
                 was significantly better than another.
