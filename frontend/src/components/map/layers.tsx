@@ -24,6 +24,34 @@ function useCanvasRenderer(): L.Canvas {
   return useMemo(() => L.canvas({ padding: 0.3 }), []);
 }
 
+/**
+ * A surface of its own for the selection highlight, above every road and every
+ * route.
+ *
+ * Without it the highlight is drawn onto the map's default canvas, which is the
+ * same canvas the vehicle routes use, and Leaflet paints a canvas in the order
+ * its layers were added. Re-optimising while an edge is selected rebuilds the
+ * route layer, which re-adds it *after* the highlight, and the routes' white
+ * casings then paint over the highlight. Selecting a congested link and then
+ * re-optimising is the sequence the interface itself proposes, so this is not a
+ * corner. Its own pane makes the stacking a property of the map rather than of
+ * the order two effects happened to run in.
+ */
+const HIGHLIGHT_PANE = 'qroute-edge-highlight';
+
+function useHighlightRenderer(map: L.Map): L.Canvas {
+  return useMemo(() => {
+    if (!map.getPane(HIGHLIGHT_PANE)) {
+      const pane = map.createPane(HIGHLIGHT_PANE);
+      // Between the overlay pane (400) and the marker pane (600): over the
+      // roads and the routes, under the depot, the popups and the tooltips.
+      pane.style.zIndex = '450';
+      pane.style.pointerEvents = 'none';
+    }
+    return L.canvas({ padding: 0.3, pane: HIGHLIGHT_PANE });
+  }, [map]);
+}
+
 // ------------------------------------------------------------------ colour
 
 /**
@@ -76,6 +104,7 @@ export function EdgeLayer({
 }) {
   const map = useMap();
   const renderer = useCanvasRenderer();
+  const highlight = useHighlightRenderer(map);
   // Held in a ref so that changing the click handler does not force several
   // thousand polylines to be rebuilt; written in an effect, because mutating a
   // ref during render is not safe under concurrent rendering.
@@ -128,6 +157,13 @@ export function EdgeLayer({
     if (!feature) return undefined;
     const points: LatLng[] = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
     const width = edgeWeight(feature.properties.highway, false) + 0.6;
+    // The redrawn segment on top is the only stroke here that carries a value,
+    // so it is not allowed to become a hairline. At its own road-class width a
+    // residential link is 1.6 px inside a 9.6 px mark — a sixth of the thing
+    // the reader is looking at — and the highlight then reports its own
+    // presence rather than the congestion it was opened to show. Three pixels
+    // is the floor at which the band's hue is still readable as a colour.
+    const core = Math.max(width, 3);
     // Three strokes, because no one stroke can be seen on all three base
     // layers. The white outer casing is what makes the highlight visible over
     // satellite imagery and the dark map; the navy ring is what makes it
@@ -136,20 +172,23 @@ export function EdgeLayer({
     // that the edge was selected to inspect.
     const halo = L.layerGroup([
       L.polyline(points, {
+        renderer: highlight,
         color: casing(),
-        weight: width + 8,
+        weight: core + 8,
         opacity: 0.9,
         interactive: false,
       }),
       L.polyline(points, {
+        renderer: highlight,
         color: token('--navy'),
-        weight: width + 4,
+        weight: core + 4,
         opacity: 0.95,
         interactive: false,
       }),
       L.polyline(points, {
+        renderer: highlight,
         color: congestionColor(feature.properties.congestion),
-        weight: width,
+        weight: core,
         opacity: 1,
         interactive: false,
       }),
@@ -157,7 +196,7 @@ export function EdgeLayer({
     return () => {
       halo.remove();
     };
-  }, [edges, selectedEdge, map]);
+  }, [edges, selectedEdge, map, highlight]);
 
   return null;
 }

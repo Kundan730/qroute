@@ -31,11 +31,11 @@ export interface Band {
 
 /** Band edges copied from `qroute.traffic.bpr.CONGESTION_BANDS`. */
 export const CONGESTION_BANDS: Band[] = [
-  { name: 'free', max: 0.1, color: '#a6adb9', label: 'Free flow' },
-  { name: 'light', max: 0.35, color: '#7d8698', label: 'Light' },
-  { name: 'moderate', max: 0.75, color: '#8e6aa8', label: 'Moderate' },
-  { name: 'heavy', max: 1.5, color: '#a8497e', label: 'Heavy' },
-  { name: 'severe', max: Number.POSITIVE_INFINITY, color: '#b5364a', label: 'Severe' },
+  { name: 'free', max: 0.1, color: '#7c8493', label: 'Free flow' },
+  { name: 'light', max: 0.35, color: '#66708a', label: 'Light' },
+  { name: 'moderate', max: 0.75, color: '#7d519b', label: 'Moderate' },
+  { name: 'heavy', max: 1.5, color: '#a33f74', label: 'Heavy' },
+  { name: 'severe', max: Number.POSITIVE_INFINITY, color: '#b02a3f', label: 'Severe' },
 ];
 
 /** Descriptions of each band in the units a reader can check: delay percentage. */
@@ -92,7 +92,7 @@ const ALGORITHM_COLORS: Record<string, string> = {
   ga: '#8e4a2f',
   sa: '#6f4a9c',
   aco: '#2f5d63',
-  random: '#a6adb9',
+  random: '#7c8493',
   ortools: '#93553a',
   pyvrp: '#b5364a',
   cpsat: '#3f4a5c',

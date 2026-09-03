@@ -381,6 +381,13 @@ class BenchmarkDetail(BaseModel):
     omnibus: Optional[FriedmanResultModel] = None
     n_ok: int = 0
     n_failed: int = 0
+    #: Runs where a solver returned nothing within its budget. These are neither
+    #: successes nor errors: OR-Tools does it on the larger instances. They were
+    #: omitted from this payload while the summary counted them, so the
+    #: interface showed "0 failed" for a sweep that contained ten of them.
+    n_no_solution: int = 0
+    no_solution: list[dict[str, Any]] = Field(default_factory=list)
+    n_infeasible: int = 0
     max_seconds: float = 0.0
     environment: dict[str, Any] = Field(default_factory=dict)
 

@@ -595,6 +595,9 @@ def _benchmark_detail(name: str, *, include_rows: bool, include_curves: bool) ->
         "omnibus": _omnibus(summary),
         "n_ok": summary.get("n_ok", 0),
         "n_failed": summary.get("n_failed", 0),
+        "n_no_solution": summary.get("n_no_solution", 0),
+        "no_solution": summary.get("no_solution", []),
+        "n_infeasible": summary.get("n_infeasible", 0),
         "max_seconds": float((meta.get("config") or {}).get("max_seconds", 0.0) or 0.0),
         "environment": meta.get("environment", {}),
     }

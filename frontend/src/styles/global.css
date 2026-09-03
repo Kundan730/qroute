@@ -55,7 +55,7 @@
   /* --- ink ------------------------------------------------------------ */
   --text: #1c273b;
   --text-dim: #5a6376;
-  --text-faint: #868da0;
+  --text-faint: #6f7789;
 
   /* --- accent: the navy itself ------------------------------------------
      There is no coloured accent in the chrome. Every control - the primary
@@ -81,13 +81,17 @@
 
   /* Congestion ramp, matched band for band to
      qroute.traffic.bpr.CONGESTION_BANDS. Grey through to crimson: no green, no
-     gold, no blue. Free-flowing roads are deliberately the quietest thing on
-     the map, because a road behaving normally is not news. */
-  --cong-free: #a6adb9;
-  --cong-light: #7d8698;
-  --cong-moderate: #8e6aa8;
-  --cong-heavy: #a8497e;
-  --cong-severe: #b5364a;
+     gold, no blue. Free-flowing roads are the quietest thing on the map,
+     because a road behaving normally is not news - but quiet is not invisible:
+     an earlier draft put free flow at #a6adb9, which measured 2.26:1 against
+     the basemap and made the whole network disappear at an uncongested hour.
+     Every band now clears 3:1, and the ordering is carried by rising
+     saturation rather than by lightness alone. */
+  --cong-free: #7c8493;
+  --cong-light: #66708a;
+  --cong-moderate: #7d519b;
+  --cong-heavy: #a33f74;
+  --cong-severe: #b02a3f;
 
   --radius: 3px;
   --radius-lg: 5px;
@@ -529,6 +533,9 @@ button.btn.small {
   height: 7px;
   border-radius: 50%;
   flex: 0 0 auto;
+  /* A default, because the class carried geometry and no colour: a dot with no
+     inline background rendered as nothing at all. */
+  background: var(--navy-200);
 }
 
 /* ---------------------------------------------------------------- stats */
@@ -686,7 +693,14 @@ td.num {
 }
 
 .basemap-satellite .leaflet-tile-pane {
-  filter: saturate(0.72) brightness(1.06) contrast(0.94);
+  /* Pushed harder than it looks like it needs. Aerial imagery is high-variance
+     everywhere, so a coloured line over an unwashed photograph has no reliable
+     contrast at all: measured against a real Koramangala tile, every congestion
+     band failed 3:1 at the gentler setting. Washing the imagery out costs some
+     of its detail and buys back the legibility of the data drawn on top, which
+     is the right trade for a layer whose job is to prove the stops sit on real
+     buildings. */
+  filter: saturate(0.45) brightness(1.24) contrast(0.78);
 }
 
 .basemap-dark .leaflet-tile-pane {

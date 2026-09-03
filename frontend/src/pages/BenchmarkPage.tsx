@@ -27,7 +27,7 @@
  *     column, not the raw one.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   Bar,
   BarChart,
@@ -63,6 +63,23 @@ import { useAppStore } from '../store/appStore';
 
 /** The threshold every significance statement on this page is made against. */
 const ALPHA = 0.05;
+
+/**
+ * Height of one summary row in the per-instance grid, in pixels.
+ *
+ * The grid scrolls inside a bounded box so its sticky header stays put, which
+ * means the bottom edge falls wherever the box ends - through the middle of a
+ * row, if nothing stops it. The two summary rows are therefore pinned to the
+ * bottom of that box, and the upper one needs to know how tall the lower one
+ * is. The number mirrors `table.grid td` in global.css: 6px padding top and
+ * bottom around an 18px line box, plus the 1px rule above the block.
+ */
+const SUMMARY_ROW_H = 31;
+
+/** Pins a summary row to the bottom of the scrolling grid. */
+function summaryRow(offset: number): CSSProperties {
+  return { position: 'sticky', bottom: offset, zIndex: 2 };
+}
 
 function plural(count: number, noun: string): string {
   return `${fmtInt(count)} ${noun}${count === 1 ? '' : 's'}`;
@@ -367,7 +384,19 @@ export function BenchmarkPage() {
         {detail && (
           <RailSection title="Environment">
             <KeyValue label="Python" value={detail.environment.python ?? '—'} />
-            <KeyValue label="Platform" value={detail.environment.platform ?? '—'} />
+            {/*
+              The platform string is a single unbroken machine identifier
+              (`macOS-26.2-arm64-arm-64bit-Mach-O`) and is far wider than the
+              rail. It has to fold rather than ellipse: this panel exists so a
+              result can be reproduced, and half a platform string reproduces
+              nothing.
+            */}
+            <KeyValue
+              label="Platform"
+              value={detail.environment.platform ?? '—'}
+              title={detail.environment.platform ?? undefined}
+              wrap
+            />
             <KeyValue label="CPU count" value={fmtInt(detail.environment.cpu_count ?? null)} />
             <KeyValue
               label="Commit"
@@ -482,17 +511,30 @@ export function BenchmarkPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={perAlgorithm}
-                      margin={{ top: 8, right: 16, bottom: 24, left: 8 }}
+                      margin={{ top: 8, right: 16, bottom: 30, left: 8 }}
                     >
                       <CartesianGrid stroke={theme.grid} strokeDasharray="2 4" vertical={false} />
+                      {/*
+                        `interval={0}` forces a label on every bar. Left to its
+                        own devices Recharts drops the ticks it cannot fit
+                        horizontally, and in a two-up panel that meant nine bars
+                        carrying five names - the reader could not tell ga from
+                        pso from qiea from random. Rotating is the cost of
+                        labelling all nine at this width.
+                      */}
                       <XAxis
                         dataKey="algorithm"
                         stroke={theme.axis}
                         tick={axisTick}
+                        interval={0}
+                        angle={-38}
+                        textAnchor="end"
+                        height={48}
+                        tickMargin={2}
                         label={{
                           value: 'algorithm',
                           position: 'insideBottom',
-                          offset: -14,
+                          offset: -20,
                           style: axisLabel,
                         }}
                       />
@@ -660,7 +702,16 @@ export function BenchmarkPage() {
                 }
                 flush
               >
-                <div style={{ overflowX: 'auto' }}>
+                {/*
+                  `table.grid th` in global.css is `position: sticky; top: 0`, which only
+                  does anything if this wrapper is the nearest *vertical* scroll container.
+                  `overflow-x: auto` alone forces `overflow-y` to compute to `auto` but the
+                  wrapper still sizes to its content, so it never scrolls vertically and the
+                  header used to scroll away with the page - leaving nine numeric columns
+                  with no way to tell which solver each one was. Bounding the height makes
+                  the wrapper the scroll container the sticky rule was written for.
+                */}
+                <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
                   <table className="grid">
                     <thead>
                       <tr>
@@ -738,6 +789,7 @@ export function BenchmarkPage() {
                         <tr>
                           <td
                             style={{
+                              ...summaryRow(SUMMARY_ROW_H),
                               fontWeight: 600,
                               background: 'var(--panel-alt)',
                               borderTop: '1px solid var(--border-strong)',
@@ -748,6 +800,7 @@ export function BenchmarkPage() {
                           <td
                             className="num"
                             style={{
+                              ...summaryRow(SUMMARY_ROW_H),
                               background: 'var(--panel-alt)',
                               borderTop: '1px solid var(--border-strong)',
                             }}
@@ -759,6 +812,7 @@ export function BenchmarkPage() {
                               key={c.algorithm}
                               className="num"
                               style={{
+                                ...summaryRow(SUMMARY_ROW_H),
                                 background: 'var(--panel-alt)',
                                 borderTop: '1px solid var(--border-strong)',
                                 fontWeight: c.mean === bestGap.value ? 600 : 400,
@@ -772,17 +826,23 @@ export function BenchmarkPage() {
                         </tr>
                       )}
                       <tr>
-                        <td style={{ fontWeight: 600, background: 'var(--panel-alt)' }}>
+                        <td
+                          style={{ ...summaryRow(0), fontWeight: 600, background: 'var(--panel-alt)' }}
+                        >
                           Best in row
                         </td>
-                        <td className="num" style={{ background: 'var(--panel-alt)' }}>
+                        <td className="num" style={{ ...summaryRow(0), background: 'var(--panel-alt)' }}>
                           —
                         </td>
                         {columnSummary.map((c) => (
                           <td
                             key={c.algorithm}
                             className="num"
-                            style={{ background: 'var(--panel-alt)', color: 'var(--text-dim)' }}
+                            style={{
+                              ...summaryRow(0),
+                              background: 'var(--panel-alt)',
+                              color: 'var(--text-dim)',
+                            }}
                             title={`${c.algorithm} held the best value on ${c.wins} of ${c.measured} instances it was measured on`}
                           >
                             {fmtInt(c.wins)}/{fmtInt(c.measured)}
