@@ -224,4 +224,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
 # 0.0.0.0 rather than the 127.0.0.1 default: inside a container, binding the
 # loopback interface makes the service unreachable from the published port.
 # The container boundary, not the bind address, is what limits exposure here.
-CMD ["qroute", "serve", "--host", "0.0.0.0", "--port", "8000"]
+#
+# No flags: `qroute serve` reads QROUTE_HOST and QROUTE_PORT, set just above.
+# A host that dictates a port - Hugging Face Spaces, Cloud Run, Heroku - can
+# then override the variable instead of needing this file edited.
+ENV QROUTE_HOST=0.0.0.0
+ENV QROUTE_PORT=8000
+CMD ["qroute", "serve"]
