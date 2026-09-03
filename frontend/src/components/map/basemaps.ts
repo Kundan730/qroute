@@ -1,11 +1,17 @@
 /**
  * Base layers for the map, and why these three.
  *
- * All of them are key-free. That is a hard requirement rather than a
- * convenience: the demonstration is given on venue wifi in front of a panel,
- * and a basemap that needs an account is a basemap that can fail in the one
- * minute it matters. If tiles do not arrive at all the road network still
- * draws, because the roads are the data and the basemap is only context.
+ * All of them are key-free, and that is a hard requirement rather than a
+ * convenience: the demonstration is given on venue wifi in front of a panel, and
+ * a basemap that needs an account is a basemap that can fail in the one minute
+ * it matters. If tiles do not arrive at all the road network still draws,
+ * because the roads are the data and the basemap is only context.
+ *
+ * All three come from Esri's free tile services. CARTO's vector basemaps were
+ * used first and had to be dropped: they fetch perfectly well from a terminal
+ * but, given a browser Referer, return a tile stamped API KEY REQUIRED straight
+ * across the map. That is the precise failure this comment exists to prevent,
+ * and it is only visible if someone actually looks at the running application.
  *
  * Each layer is paired with a body class so the stylesheet can hold it back by
  * a different amount. A pale vector basemap needs almost no restraint; satellite
@@ -26,6 +32,12 @@ export interface Basemap {
   /** Class applied to the map wrapper, read by `.basemap-*` rules in the CSS. */
   bodyClass: string;
   subdomains?: string;
+  /**
+   * Deepest zoom the provider actually publishes. Leaflet upscales beyond it
+   * rather than requesting tiles that come back blank, which matters for the
+   * grey canvas layers: they stop at 16 while the map goes to 19.
+   */
+  maxNativeZoom?: number;
 }
 
 export const BASEMAPS: Basemap[] = [
@@ -33,14 +45,14 @@ export const BASEMAPS: Basemap[] = [
     id: 'light',
     label: 'Light',
     purpose:
-      'A pale vector basemap. Street geometry stays legible while the congestion ' +
+      'A pale grey canvas. Street geometry stays legible while the congestion ' +
       'colours and the vehicle routes carry all the saturation on screen. This is ' +
       'the default because it is the one that reads on a projector and in print.',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    subdomains: 'abcd',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
     attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
+      'Tiles &copy; <a href="https://www.esri.com/">Esri</a> &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
+    maxZoom: 19,
+    maxNativeZoom: 16,
     bodyClass: 'basemap-light',
   },
   {
@@ -60,13 +72,13 @@ export const BASEMAPS: Basemap[] = [
     id: 'dark',
     label: 'Dark',
     purpose:
-      'A dark vector basemap. Highest contrast for the route colours, and the ' +
-      'right choice in a dim room, though it fights the rest of the interface.',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    subdomains: 'abcd',
+      'A dark grey canvas. Highest contrast for the route colours, and the right ' +
+      'choice in a dim room, though it fights the rest of the interface.',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
     attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
+      'Tiles &copy; <a href="https://www.esri.com/">Esri</a> &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
+    maxZoom: 19,
+    maxNativeZoom: 16,
     bodyClass: 'basemap-dark',
   },
 ];

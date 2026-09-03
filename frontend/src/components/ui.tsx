@@ -77,7 +77,15 @@ export function Field({
     <div className="field">
       <label>{label}</label>
       {children}
-      {hint !== undefined && <span className="field-hint">{hint}</span>}
+      {hint !== undefined && (
+        // `.field-hint` is painted --text-faint by global.css, which is 3.3:1 on
+        // a white panel. Hints are prose a reader is expected to read, so the
+        // primitive darkens them to --text-dim (5.9:1) rather than leaving a
+        // shared class failing contrast on every page that uses a Field.
+        <span className="field-hint" style={{ color: 'var(--text-dim)' }}>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
@@ -105,7 +113,13 @@ export function Stat({
         {value}
         {unit && <span className="unit">{unit}</span>}
       </div>
-      {sub !== undefined && <div className="stat-sub">{sub}</div>}
+      {sub !== undefined && (
+        // Same reason as the field hint: --text-faint on --panel is 3.3:1, and
+        // the sub-line carries the denominator a stat is meaningless without.
+        <div className="stat-sub" style={{ color: 'var(--text-dim)' }}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
@@ -240,15 +254,38 @@ export function KeyValue({
   label,
   value,
   title,
+  wrap = false,
 }: {
   label: string;
   value: ReactNode;
   title?: string;
+  /**
+   * Let a long value fold onto a second line instead of running off the rail.
+   *
+   * `.kv` in global.css is a baseline flex row whose value is `nowrap` and
+   * whose label ellipses. That is right for the numbers this row usually
+   * carries, but a value with no spaces - a platform string, a commit, a file
+   * name - first squeezes the label to nothing (so the reader cannot tell what
+   * they are looking at) and then overflows the rail's padding, because a
+   * `nowrap` span cannot shrink below its text. Opting into `wrap` pins the
+   * label at its natural width and lets the value break, which keeps the row
+   * inside the rail and the whole value on screen. Off by default, so every
+   * existing caller keeps the single-line row it was written for.
+   */
+  wrap?: boolean;
 }) {
   return (
     <div className="kv" title={title}>
-      <span>{label}</span>
-      <span>{value}</span>
+      <span style={wrap ? { flex: '0 0 auto', overflow: 'visible' } : undefined}>{label}</span>
+      <span
+        style={
+          wrap
+            ? { whiteSpace: 'normal', overflowWrap: 'anywhere', textAlign: 'right', minWidth: 0 }
+            : undefined
+        }
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -263,8 +300,17 @@ export function Notice({
   return <div className={`notice${kind === 'error' ? ' error' : ''}`}>{children}</div>;
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className="empty">{children}</div>;
+export function Empty({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  // An empty state is the only thing on screen when it shows, so it has to be
+  // readable: --text-dim rather than the --text-faint the shared class uses.
+  // `style` exists so a caller can reserve the height of the chart or table the
+  // panel would otherwise be showing, without reaching for the bare class name
+  // and losing the colour correction with it.
+  return (
+    <div className="empty" style={{ color: 'var(--text-dim)', ...style }}>
+      {children}
+    </div>
+  );
 }
 
 /**

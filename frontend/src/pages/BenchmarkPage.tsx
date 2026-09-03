@@ -17,8 +17,10 @@
  *     never look alike. Every absent value prints as an em dash, and a cell
  *     whose solver returned no solution at all is additionally hatched and
  *     annotated, so a blank is never mistaken for a zero.
- *   - The best value in a row is emphasised by weight, ground and a rule at
- *     once, so it survives greyscale and a projector.
+ *   - The best value in a row is emphasised by weight and ground together, so
+ *     it survives greyscale and a projector, and a value no other solver
+ *     matched additionally carries a rule - which is the interesting case,
+ *     because on the easy instances most of the field ties at zero.
  *   - A verdict is stated in words. "Significant", "not after Holm" and "no
  *     difference" are three different marks with three different shapes, and
  *     the corrected p-value - the one that actually decides - is the emphasised
@@ -31,7 +33,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend as ChartLegend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -44,6 +45,7 @@ import type { BenchmarkDetail, BenchmarkSummary } from '../api/types';
 import {
   Badge,
   Caption,
+  Empty,
   Field,
   KeyValue,
   Meter,
@@ -61,6 +63,10 @@ import { useAppStore } from '../store/appStore';
 
 /** The threshold every significance statement on this page is made against. */
 const ALPHA = 0.05;
+
+function plural(count: number, noun: string): string {
+  return `${fmtInt(count)} ${noun}${count === 1 ? '' : 's'}`;
+}
 
 /**
  * Chart colours, read from the design tokens at run time.
@@ -192,10 +198,13 @@ export function BenchmarkPage() {
         return metric === 'gap' ? cell.gap.median : cell.cost.median;
       });
       const finite = values.filter((v) => Number.isFinite(v));
+      const best = finite.length > 0 ? Math.min(...finite) : Number.NaN;
       return {
         instance,
         values,
-        best: finite.length > 0 ? Math.min(...finite) : Number.NaN,
+        best,
+        /** How many algorithms hold the best value; more than one is a tie. */
+        bestCount: finite.filter((v) => v === best).length,
         bks: provenance.bks.get(instance) ?? null,
       };
     });
@@ -218,12 +227,18 @@ export function BenchmarkPage() {
     });
   }, [detail, grid]);
 
-  const bestMeanGap = useMemo(
-    () => (columnSummary.length > 0
-      ? Math.min(...columnSummary.map((c) => c.mean).filter(Number.isFinite))
-      : Number.NaN),
-    [columnSummary],
-  );
+  /**
+   * The headline "best mean gap" is always a *gap*, whatever the grid is
+   * currently showing. Deriving it from the column summary instead would
+   * silently print a mean cost with a per-cent sign the moment the reader
+   * switched the table metric.
+   */
+  const bestGap = useMemo(() => {
+    const measured = perAlgorithm.filter((a) => Number.isFinite(a.meanGap));
+    if (measured.length === 0) return { value: Number.NaN, algorithm: '—' };
+    const winner = measured.reduce((best, a) => (a.meanGap < best.meanGap ? a : best));
+    return { value: winner.meanGap, algorithm: winner.algorithm };
+  }, [perAlgorithm]);
 
   /**
    * Instances on which every algorithm produced a result. The Friedman test is
@@ -274,12 +289,19 @@ export function BenchmarkPage() {
   const tooltipStyle = {
     background: theme.panel,
     border: `1px solid ${theme.borderStrong}`,
-    borderRadius: 3,
+    borderRadius: 'var(--radius)',
     fontSize: 12,
     color: theme.text,
     padding: '6px 9px',
     boxShadow: 'var(--shadow-float)',
   };
+  // Recharts paints a tooltip row in the colour of the series it belongs to.
+  // That is fine for the swatch, which is a graphic, but not for the words: the
+  // palette contains series pale enough that the name would drop to about
+  // 2.3:1 on a white panel, which is unreadable. The mark keeps the hue and the
+  // text is set in ink. The chart key is built in the DOM for the same reason,
+  // plus one Recharts cannot solve: see the note above it.
+  const tooltipItemStyle = { color: theme.text };
   const axisTick = { fill: theme.tick, fontSize: 11 };
   const axisLabel = { fill: theme.label, fontSize: 11 };
 
@@ -298,12 +320,6 @@ export function BenchmarkPage() {
   const totalRuns = perAlgorithm.reduce((a, b) => a + b.runs, 0);
   const totalHits = perAlgorithm.reduce((a, b) => a + b.hits, 0);
   const totalFeasible = perAlgorithm.reduce((a, b) => a + b.feasible, 0);
-  const bestAlgorithm =
-    columnSummary.length > 0
-      ? columnSummary.reduce((best, c) =>
-          Number.isFinite(c.mean) && !(best.mean <= c.mean) ? c : best,
-        )
-      : null;
   const survivingComparisons =
     detail?.omnibus?.post_hoc.filter((t) => (t.p_adjusted ?? t.p_value) <= ALPHA).length ?? 0;
 
@@ -380,12 +396,12 @@ export function BenchmarkPage() {
             <Notice kind="error">{error}</Notice>
           </div>
         )}
-        {loading && !detail && <div className="empty">Loading results…</div>}
+        {loading && !detail && <Empty>Loading results…</Empty>}
         {!loading && !detail && !error && (
-          <div className="empty">
+          <Empty>
             No benchmark results are available. Run one with{' '}
             <code style={{ marginLeft: 4 }}>python -m qroute.cli bench</code>.
-          </div>
+          </Empty>
         )}
 
         {detail && (
@@ -404,8 +420,8 @@ export function BenchmarkPage() {
                 className="mono"
                 style={{ fontSize: 11, color: 'var(--text-dim)' }}
               >
-                {fmtInt(totalRuns)} runs · {fmtInt(detail.instances.length)} instances ·{' '}
-                {fmtInt(detail.algorithms.length)} solvers ·{' '}
+                {fmtInt(totalRuns)} runs · {plural(detail.instances.length, 'instance')} ·{' '}
+                {plural(detail.algorithms.length, 'solver')} ·{' '}
                 {fmtSeconds(detail.max_seconds)} per run
               </span>
               {detail.environment.git_commit && (
@@ -419,8 +435,8 @@ export function BenchmarkPage() {
             <StatGrid columns={5}>
               <Stat
                 label="Best mean gap"
-                value={fmtPercent(bestMeanGap, 2)}
-                sub={bestAlgorithm ? bestAlgorithm.algorithm : '—'}
+                value={fmtPercent(bestGap.value, 2)}
+                sub={bestGap.algorithm}
               />
               <Stat
                 label="Optima matched"
@@ -495,6 +511,7 @@ export function BenchmarkPage() {
                       />
                       <Tooltip
                         contentStyle={tooltipStyle}
+                        itemStyle={tooltipItemStyle}
                         cursor={{ fill: theme.grid, fillOpacity: 0.5 }}
                         formatter={(value: unknown) => [`${fmt(Number(value), 3)} %`, 'mean gap']}
                       />
@@ -524,11 +541,48 @@ export function BenchmarkPage() {
               <Panel title="Gap distribution across all runs">
                 {distribution.points.length > 0 ? (
                   <>
+                    {/*
+                      The key is drawn in the DOM above the plot rather than by
+                      Recharts. Recharts reserves a fixed band for its legend,
+                      and with nine series that band overflows into the plot
+                      below roughly 1050px - the names print over the curves and
+                      the y-axis ticks. A flex row wraps into as many lines as it
+                      needs and pushes the chart down instead of covering it, and
+                      it reuses the same Swatch the per-instance table uses, so
+                      one key serves both.
+                    */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        gap: '3px 12px',
+                        marginBottom: 8,
+                      }}
+                    >
+                      {distribution.algorithms.map((a) => (
+                        <span
+                          key={a}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            fontSize: 11,
+                            fontFamily: 'var(--mono)',
+                            color: 'var(--text)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <Swatch color={algorithmColor(a)} />
+                          {a}
+                        </span>
+                      ))}
+                    </div>
                     <div style={{ width: '100%', height: 220 }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={distribution.points}
-                          margin={{ top: 8, right: 16, bottom: 24, left: 8 }}
+                          margin={{ top: 4, right: 16, bottom: 24, left: 8 }}
                         >
                           <CartesianGrid stroke={theme.grid} strokeDasharray="2 4" />
                           <XAxis
@@ -560,14 +614,12 @@ export function BenchmarkPage() {
                           />
                           <Tooltip
                             contentStyle={tooltipStyle}
+                            itemStyle={tooltipItemStyle}
                             labelFormatter={(v) => `gap ≤ ${fmt(Number(v), 2)} %`}
                             formatter={(value: unknown, key: unknown) => [
                               `${fmt(Number(value), 1)} % of runs`,
                               String(key),
                             ]}
-                          />
-                          <ChartLegend
-                            wrapperStyle={{ fontSize: 11, color: theme.tick, paddingTop: 4 }}
                           />
                           {distribution.algorithms.map((a) => (
                             <Line
@@ -590,9 +642,9 @@ export function BenchmarkPage() {
                     </Note>
                   </>
                 ) : (
-                  <div className="empty" style={{ minHeight: 220 }}>
+                  <Empty style={{ minHeight: 220 }}>
                     Per-run rows were not included in this result set.
-                  </div>
+                  </Empty>
                 )}
               </Panel>
             </div>
@@ -608,7 +660,7 @@ export function BenchmarkPage() {
                 }
                 flush
               >
-                <div style={{ maxHeight: 460, overflow: 'auto' }}>
+                <div style={{ overflowX: 'auto' }}>
                   <table className="grid">
                     <thead>
                       <tr>
@@ -643,6 +695,11 @@ export function BenchmarkPage() {
                             const failure = provenance.failures.get(`${row.instance}|${algorithm}`);
                             const unsolved = !Number.isFinite(value) && (failure?.failed ?? 0) > 0;
                             const isBest = Number.isFinite(value) && value === row.best;
+                            // The rule is reserved for a value no other solver
+                            // matched. On the easy instances most of the field
+                            // ties at zero, and ruling nine cells at once would
+                            // say nothing while looking like column banding.
+                            const isOutright = isBest && row.bestCount === 1;
                             return (
                               <td
                                 key={algorithm}
@@ -650,19 +707,21 @@ export function BenchmarkPage() {
                                 title={
                                   unsolved
                                     ? `${algorithm} returned no complete solution on ${failure?.failed} of ${failure?.total} seeds of ${row.instance}`
-                                    : Number.isFinite(value)
-                                      ? `${algorithm} on ${row.instance}`
-                                      : `${algorithm} was not run on ${row.instance}`
+                                    : isOutright
+                                      ? `${algorithm} was strictly better than every other solver on ${row.instance}`
+                                      : Number.isFinite(value)
+                                        ? `${algorithm} on ${row.instance}`
+                                        : `${algorithm} was not run on ${row.instance}`
                                 }
                                 style={{
                                   fontWeight: isBest ? 600 : 400,
                                   color: isBest ? 'var(--accent-text)' : 'var(--text)',
                                   background: isBest
-                                    ? 'var(--accent-soft)'
+                                    ? 'var(--bg)'
                                     : unsolved
                                       ? 'repeating-linear-gradient(45deg, var(--panel-alt), var(--panel-alt) 3px, var(--bg) 3px, var(--bg) 6px)'
                                       : undefined,
-                                  boxShadow: isBest ? 'inset 2px 0 0 var(--accent)' : undefined,
+                                  boxShadow: isOutright ? 'inset 2px 0 0 var(--accent)' : undefined,
                                 }}
                               >
                                 {Number.isFinite(value)
@@ -702,9 +761,9 @@ export function BenchmarkPage() {
                               style={{
                                 background: 'var(--panel-alt)',
                                 borderTop: '1px solid var(--border-strong)',
-                                fontWeight: c.mean === bestMeanGap ? 600 : 400,
+                                fontWeight: c.mean === bestGap.value ? 600 : 400,
                                 color:
-                                  c.mean === bestMeanGap ? 'var(--accent-text)' : 'var(--text)',
+                                  c.mean === bestGap.value ? 'var(--accent-text)' : 'var(--text)',
                               }}
                             >
                               {fmt(c.mean, 2)}
@@ -756,12 +815,12 @@ export function BenchmarkPage() {
                       style={{
                         width: 22,
                         height: 14,
-                        background: 'var(--accent-soft)',
+                        background: 'var(--bg)',
                         boxShadow: 'inset 2px 0 0 var(--accent)',
                         border: '1px solid var(--border)',
                       }}
                     />
-                    best in the row (bold, tinted, ruled)
+                    best in the row; a rule marks a value no other solver matched
                   </span>
                   <span
                     style={{
@@ -946,7 +1005,7 @@ export function BenchmarkPage() {
                                     style={{
                                       fontWeight: significant ? 600 : 400,
                                       color: significant ? 'var(--accent-text)' : 'var(--text)',
-                                      background: significant ? 'var(--accent-soft)' : undefined,
+                                      background: significant ? 'var(--bg)' : undefined,
                                     }}
                                   >
                                     {fmtP(test.p_adjusted)}
@@ -991,11 +1050,11 @@ export function BenchmarkPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="empty" style={{ minHeight: 120 }}>
+                  <Empty style={{ minHeight: 120 }}>
                     No omnibus test was computed for this result set. The
                     Friedman test needs at least three algorithms measured on the
                     same instances.
-                  </div>
+                  </Empty>
                 )}
               </Panel>
             </div>

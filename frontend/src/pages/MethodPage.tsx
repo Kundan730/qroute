@@ -53,38 +53,43 @@ function Claim({ label, children }: { label: string; children: React.ReactNode }
 export function MethodPage() {
   return (
     <div className="page-scroll">
+      {/* Two columns, side by side wherever there is room for both and stacked
+          where there is not. Flex rather than grid: with exactly two children a
+          wrapping row can only ever be two-up or one-up, whereas an auto-fit
+          grid would helpfully find room for a third column at 1440. */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          display: 'flex',
+          flexWrap: 'wrap',
           gap: 12,
-          alignItems: 'start',
+          alignItems: 'flex-start',
         }}
       >
         {/* ------------------------------------------- positioning, full width */}
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div style={{ flex: '1 1 100%' }}>
           <Panel title="Positioning">
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(240px, 0.95fr) minmax(0, 2fr)',
+                display: 'flex',
+                flexWrap: 'wrap',
                 gap: 22,
-                alignItems: 'start',
+                alignItems: 'flex-start',
               }}
             >
-              <div>
-                <h2
+              <div style={{ flex: '1 1 260px' }}>
+                {/* h3: the panel's own title is the h2 this sits under. */}
+                <h3
                   style={{
                     fontFamily: 'var(--display)',
                     fontSize: 17,
                     fontWeight: 600,
                     letterSpacing: '-0.015em',
                     color: 'var(--text)',
-                    marginBottom: 7,
+                    margin: '0 0 7px',
                   }}
                 >
                   Quantum-behaved, not quantum hardware
-                </h2>
+                </h3>
                 <p style={{ ...PROSE, margin: 0 }}>
                   The optimiser is quantum-behaved particle swarm optimisation
                   (QPSO), introduced by Sun, Feng and Xu in 2004. The word
@@ -96,8 +101,9 @@ export function MethodPage() {
 
               <div
                 style={{
+                  flex: '2 1 420px',
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
                   gap: 1,
                   background: 'var(--border)',
                   border: '1px solid var(--border)',
@@ -126,7 +132,7 @@ export function MethodPage() {
         </div>
 
         {/* ------------------------------------------------------ left column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ flex: '1 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Panel title="What the model computes exactly">
             <div style={PROSE}>
               <p>
@@ -372,7 +378,7 @@ export function MethodPage() {
         </div>
 
         {/* ----------------------------------------------------- right column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ flex: '1 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Panel title="Where a quantum particle can go">
             <SamplingDemo />
           </Panel>

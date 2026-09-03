@@ -30,6 +30,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { V } from './Equation';
+
 /** Small deterministic generator, so the illustration is the same every load. */
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -93,7 +95,7 @@ interface Tokens {
 function readTokens(): Tokens {
   const fallback: Tokens = {
     classical: '#686f7c',
-    quantum: '#3b5bd9',
+    quantum: '#1c273b',
     meanBest: '#424b5c',
     swarmBest: '#5b4fcf',
     axis: '#c2c8d4',
@@ -246,6 +248,7 @@ export function SamplingDemo() {
         {
           p: classical,
           label: 'Classical PSO particle',
+          short: 'Classical',
           note: 'velocity-clamped',
           colour: tk.classical,
           top: 4,
@@ -253,11 +256,44 @@ export function SamplingDemo() {
         {
           p: quantum,
           label: 'Quantum-behaved particle',
+          short: 'Quantum-behaved',
           note: 'unbounded support',
           colour: tk.quantum,
           top: blockH + 2,
         },
       ];
+
+      // What the heading line can hold is decided once, for both panels
+      // together, so the two rows of a comparison never disagree about their
+      // format. It is measured against the wider of the two headings and
+      // against a full-width "100 %", so the line does not reflow when one
+      // particle crosses 99 %. A step counter grows without bound, so it is the
+      // first thing dropped; then the headings fall back to the one word that
+      // carries the contrast. Nothing is ever allowed to run off the plot or
+      // into its neighbour.
+      const HEAD_GAP = 14;
+      ctx.font = `700 9px ${tk.display}`;
+      setTracking(ctx, '0.13em');
+      const longHeadW = Math.max(...panels.map((p) => ctx.measureText(p.label.toUpperCase()).width));
+      const shortHeadW = Math.max(...panels.map((p) => ctx.measureText(p.short.toUpperCase()).width));
+      setTracking(ctx, '0em');
+      ctx.font = `9px ${tk.mono}`;
+      const line = width - padL - padR;
+      const fullStatW = ctx.measureText(`100 % visited · ${steps} steps`).width;
+      const pctStatW = ctx.measureText('100 % visited').width;
+      let statMode: 'full' | 'pct' | 'none' = 'none';
+      let useShort = true;
+      if (longHeadW + HEAD_GAP + fullStatW <= line) {
+        statMode = 'full';
+        useShort = false;
+      } else if (longHeadW + HEAD_GAP + pctStatW <= line) {
+        statMode = 'pct';
+        useShort = false;
+      } else if (shortHeadW + HEAD_GAP + pctStatW <= line) {
+        statMode = 'pct';
+      } else if (longHeadW <= line) {
+        useShort = false;
+      }
 
       for (const panel of panels) {
         const labelBase = panel.top + 12;
@@ -271,27 +307,33 @@ export function SamplingDemo() {
         setTracking(ctx, '0.13em');
         ctx.fillStyle = tk.label;
         ctx.textAlign = 'left';
-        ctx.fillText(panel.label.toUpperCase(), padL, labelBase);
-        const labelW = ctx.measureText(panel.label.toUpperCase()).width;
+        const heading = (useShort ? panel.short : panel.label).toUpperCase();
+        ctx.fillText(heading, padL, labelBase);
+        const labelW = ctx.measureText(heading).width;
         setTracking(ctx, '0em');
+
+        // How much of the domain the particle has ever reached, on the right of
+        // the same line. The qualifier between them is dropped rather than
+        // allowed to collide when the column is narrow.
+        const visited = panel.p.history.reduce((a, b) => a + (b > 0 ? 1 : 0), 0);
+        const pct = `${((100 * visited) / BINS).toFixed(0)} % visited`;
+        const stat = statMode === 'full' ? `${pct} · ${steps} steps` : statMode === 'pct' ? pct : '';
         ctx.font = `9px ${tk.mono}`;
         ctx.fillStyle = tk.dim;
-        ctx.fillText(panel.note, padL + labelW + 9, labelBase);
-
-        // How much of the domain the particle has ever reached.
-        const visited = panel.p.history.reduce((a, b) => a + (b > 0 ? 1 : 0), 0);
-        ctx.font = `10px ${tk.mono}`;
-        ctx.fillStyle = tk.dim;
-        ctx.textAlign = 'right';
-        ctx.fillText(
-          `${((100 * visited) / BINS).toFixed(0)} % of domain visited / ${steps} steps`,
-          width - padR,
-          labelBase,
-        );
+        const statW = stat ? ctx.measureText(stat).width : 0;
+        const noteW = ctx.measureText(panel.note).width;
+        if (padL + labelW + 10 + noteW + HEAD_GAP + statW < width - padR) {
+          ctx.textAlign = 'left';
+          ctx.fillText(panel.note, padL + labelW + 10, labelBase);
+        }
+        if (stat) {
+          ctx.textAlign = 'right';
+          ctx.fillText(stat, width - padR, labelBase);
+        }
 
         // --- attractor references, distinguished by shape ------------------
         const refs: [number, string, string, boolean][] = [
-          [PBEST, 'personal = mean best', tk.meanBest, true],
+          [PBEST, 'mean best', tk.meanBest, true],
           [GBEST, 'swarm best', tk.swarmBest, false],
         ];
         for (const [value, text, colour, dashed] of refs) {
@@ -310,8 +352,16 @@ export function SamplingDemo() {
             ctx.font = `600 9px ${tk.display}`;
             setTracking(ctx, '0.1em');
             ctx.fillStyle = colour;
-            ctx.textAlign = dashed ? 'right' : 'left';
-            ctx.fillText(text.toUpperCase(), x + (dashed ? -8 : 9), plotTop + 3);
+            const caption = text.toUpperCase();
+            // The left-hand label is set back from its marker, unless that
+            // would push it off the plot, in which case it starts at the edge.
+            if (dashed && x - 8 - ctx.measureText(caption).width < padL) {
+              ctx.textAlign = 'left';
+              ctx.fillText(caption, padL, plotTop + 3);
+            } else {
+              ctx.textAlign = dashed ? 'right' : 'left';
+              ctx.fillText(caption, x + (dashed ? -8 : 9), plotTop + 3);
+            }
             setTracking(ctx, '0em');
           }
         }
@@ -341,7 +391,11 @@ export function SamplingDemo() {
 
         ctx.font = `9px ${tk.mono}`;
         ctx.fillStyle = tk.dim;
-        for (const t of [-1, -0.5, 0, 0.5, 1]) {
+        // Half-unit ticks are dropped rather than allowed to collide: an axis
+        // reading "-1.00.5 0 0.51.0" is worse than one reading -1, 0, 1.
+        const tickLabelW = ctx.measureText('−0.5').width;
+        const ticks = plotW / 4 >= tickLabelW + 8 ? [-1, -0.5, 0, 0.5, 1] : [-1, 0, 1];
+        for (const t of ticks) {
           const x = Math.round(toX(t)) + 0.5;
           ctx.strokeStyle = tk.axis;
           ctx.beginPath();
@@ -349,7 +403,8 @@ export function SamplingDemo() {
           ctx.lineTo(x, baseline + 4);
           ctx.stroke();
           ctx.textAlign = t === DOMAIN[0] ? 'left' : t === DOMAIN[1] ? 'right' : 'center';
-          ctx.fillText(t === 0 ? '0' : t.toFixed(1), x, baseline + 14);
+          // A true minus, so the ticks match the sign used in the equations.
+          ctx.fillText(t === 0 ? '0' : t.toFixed(1).replace('-', '−'), x, baseline + 14);
         }
 
         // The particle itself, ringed in the panel colour so it stays legible
@@ -458,10 +513,13 @@ export function SamplingDemo() {
       </div>
       <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 9, lineHeight: 1.6 }}>
         Both particles are stepped from the same seeded generator with the same
-        personal and swarm bests. Raising β widens the sampling distribution and
-        the quantum particle explores further; Sun et al.'s stability analysis
-        puts the convergence threshold near β = 1.78, and above roughly that
-        value the particle stops settling at all.
+        personal and swarm bests. The hollow square on the dashed rule is the
+        particle's personal best, which with a swarm of one is also the mean
+        best <V>m</V>; the filled triangle on the solid rule is the swarm best{' '}
+        <V>g</V>. Raising β widens the sampling distribution and the quantum
+        particle explores further; Sun et al.'s stability analysis puts the
+        convergence threshold near β = 1.78, and above roughly that value the
+        particle stops settling at all.
         {reduced && (
           <>
             {' '}

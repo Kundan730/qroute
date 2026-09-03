@@ -92,7 +92,7 @@ export default function App() {
   const markColor = offline
     ? 'var(--panel)'
     : backend === 'online'
-      ? 'var(--cong-free)'
+      ? 'var(--navy-050)'
       : 'var(--warn)';
   const statusLabel =
     backend === 'online' ? 'backend online' : offline ? 'backend offline' : 'connecting…';

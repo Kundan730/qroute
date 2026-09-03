@@ -28,7 +28,7 @@ import {
 } from 'recharts';
 import type { DotItemDotProps } from 'recharts';
 import type { RunTick } from '../api/types';
-import { fmt, fmtCompact } from '../lib/format';
+import { fmt, fmtInt } from '../lib/format';
 
 /* -------------------------------------------------------------------------- */
 /* design tokens                                                              */
@@ -36,7 +36,10 @@ import { fmt, fmtCompact } from '../lib/format';
 
 /**
  * Last-resort values, used only when this module is evaluated with no document
- * (tests, SSR) or before `global.css` has been applied. They mirror `:root`.
+ * (tests, SSR) or before `global.css` has been applied - which in this app is
+ * unreachable, since the stylesheet is a render-blocking link and the module is
+ * deferred. They mirror `:root` in `global.css` and must be re-synced with it;
+ * nothing here is a colour decision of its own.
  */
 const FALLBACK: Record<string, string> = {
   '--panel': '#ffffff',
@@ -44,11 +47,10 @@ const FALLBACK: Record<string, string> = {
   '--border-strong': '#c2c8d4',
   '--text': '#1c273b',
   '--text-dim': '#5a6376',
-  '--text-faint': '#868da0',
-  '--navy': '#1c273b',
   '--navy-300': '#686f7c',
   '--accent': '#1c273b',
   '--violet': '#5b4fcf',
+  '--rose': '#a8436a',
   '--radius': '3px',
   '--shadow-float': '0 1px 2px rgba(28, 39, 59, 0.08), 0 8px 24px rgba(28, 39, 59, 0.1)',
   '--font': "'DM Sans', ui-sans-serif, system-ui, sans-serif",
@@ -73,11 +75,21 @@ export function token(name: string): string {
   return FALLBACK[name] ?? FALLBACK['--text'];
 }
 
-/** `#rrggbb` at a given alpha, for the faint fills under a series. */
+/**
+ * A token colour at a given alpha, for the faint fills under a series.
+ *
+ * Both hex lengths are accepted because the CSS minifier shortens what it can
+ * on the way into `dist` - `--panel: #ffffff` reads back as `#fff` in the built
+ * app - and a token that silently failed to parse here would come back fully
+ * opaque rather than as a halo.
+ */
 function alpha(hex: string, a: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return hex;
-  const n = parseInt(m[1], 16);
+  const s = hex.trim();
+  const long = /^#?([0-9a-f]{6})$/i.exec(s);
+  const short = /^#?([0-9a-f]{3})$/i.exec(s);
+  const six = long ? long[1] : short ? short[1].replace(/./g, (c) => c + c) : null;
+  if (six === null) return s;
+  const n = parseInt(six, 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
@@ -144,7 +156,7 @@ function tooltipLabelStyle() {
  * Values are digits, so they are mono and tabular. No `color`: recharts then
  * paints each value in its own series hue, which keys the tooltip to the lines
  * without needing a swatch. Every series colour used here clears 4.5:1 on the
- * white panel (accent 5.7:1, navy-300 5.1:1, violet 6.1:1).
+ * white panel: accent/navy 12.6:1, navy-300 5.1:1, violet 6.1:1, rose 5.7:1.
  */
 function tooltipItemStyle() {
   return {
@@ -171,6 +183,43 @@ const LEGEND = {
 };
 
 const GRID_DASH = '2 4';
+
+/**
+ * Tick text for a cost axis, at a precision the axis can actually carry.
+ *
+ * `fmtCompact` drops to whole thousands above 10k, which is right for a count
+ * of road segments and wrong for an objective: a run on the road network whose
+ * costs live between 10,040 and 10,900 rendered five ticks reading
+ * `11k 11k 10k 10k 10k`, an axis that says nothing at all. So the precision is
+ * taken from the span the chart actually covers - one tick step has to be
+ * visible in the printed digits - and the `k` scale is kept only while it can
+ * be afforded, otherwise the figure is printed in full.
+ */
+function costTick(values: (number | null)[]): (v: number) => string {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of values) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const full = (v: number) => fmtInt(v);
+  if (!Number.isFinite(min)) return full;
+  // Recharts draws about five ticks, so one step is a fifth of the span. A
+  // series that never moved has no span and nothing to abbreviate towards.
+  const step = (max - min) / 5;
+  if (!(step > 0)) return full;
+  const magnitude = Math.max(Math.abs(min), Math.abs(max));
+  const scale = magnitude >= 1e6 ? 1e6 : magnitude >= 1e3 ? 1e3 : 1;
+  if (scale === 1) return full;
+  // Decimals enough that one step still shows in the printed digits. Past one
+  // (two on the millions scale) the abbreviation has stopped paying for itself
+  // and the figure is better read in full.
+  const digits = Math.ceil(-Math.log10(step / scale));
+  if (digits > (scale === 1e6 ? 2 : 1)) return full;
+  const suffix = scale === 1e6 ? 'M' : 'k';
+  return (v: number) => `${fmt(v / scale, Math.max(0, digits))}${suffix}`;
+}
 
 export function ChartFrame({ height, children }: { height: number; children: ReactNode }) {
   return (
@@ -228,9 +277,21 @@ export function ConvergenceChart({
     mean: Number.isFinite(t.mean_cost) ? t.mean_cost : null,
   }));
 
+  // The searched series takes the accent, the population mean sits back in
+  // grey, and the literature's best-known cost is an annotation rather than a
+  // series, so it takes --rose: one of the two hues the palette reserves for
+  // the map and the charts, and the one thing here that must stay legible
+  // whatever the accent happens to be.
   const bestColor = token('--accent');
   const meanColor = token('--navy-300');
-  const refColor = token('--navy');
+  const refColor = token('--rose');
+
+  // The reference, when there is one, is part of what the axis has to resolve:
+  // a best-known cost far below the search's range would otherwise widen the
+  // domain without widening the tick precision.
+  const yValues: (number | null)[] = data.flatMap((d) => [d.best, d.mean]);
+  if (reference !== null && Number.isFinite(reference)) yValues.push(reference);
+  const yTick = costTick(yValues);
 
   return (
     <ChartFrame height={height}>
@@ -243,6 +304,7 @@ export function ConvergenceChart({
           stroke={AXIS.stroke}
           tick={AXIS.tick}
           tickLine={{ stroke: token('--border') }}
+          minTickGap={24}
           tickFormatter={(v: number) => `${fmt(v, 1)}`}
           label={{ value: 'elapsed (s)', position: 'insideBottom', offset: -12, style: AXIS.label }}
         />
@@ -252,7 +314,7 @@ export function ConvergenceChart({
           tickLine={{ stroke: token('--border') }}
           width={62}
           domain={['auto', 'auto']}
-          tickFormatter={(v: number) => fmtCompact(v)}
+          tickFormatter={yTick}
           label={{
             value: 'objective (cost units)',
             angle: -90,
@@ -337,6 +399,7 @@ export function DiversityChart({ ticks, height = 150 }: { ticks: RunTick[]; heig
           stroke={AXIS.stroke}
           tick={AXIS.tick}
           tickLine={{ stroke: token('--border') }}
+          minTickGap={24}
           tickFormatter={(v: number) => fmt(v, 1)}
           label={{ value: 'elapsed (s)', position: 'insideBottom', offset: -12, style: AXIS.label }}
         />

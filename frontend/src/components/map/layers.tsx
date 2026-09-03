@@ -105,7 +105,12 @@ export function EdgeLayer({
       line.on('click', () => selectRef.current(props));
       line.bindTooltip(
         `${props.highway} · ${fmtDistance(props.length_m)} · ${fmt(props.congestion * 100, 0)} % delay`,
-        { sticky: true, direction: 'top', opacity: 0.95 },
+        // Opaque, not translucent: a tooltip is the only place on the map that
+        // carries a number, and a number read through a photograph of a city is
+        // not a number anyone will trust. The same goes for the route and
+        // exact-path tooltips below, which Leaflet would otherwise default to
+        // 0.9. All three now match.
+        { sticky: true, direction: 'top', opacity: 1 },
       );
       group.addLayer(line);
     }
@@ -180,13 +185,13 @@ export function EdgeLayer({
  */
 const DEPOT_ICON = L.divIcon({
   className: '',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-  popupAnchor: [0, -12],
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+  popupAnchor: [0, -14],
   html:
-    '<span style="display:block;width:10px;height:10px;margin:2px;' +
+    '<span style="display:block;width:12px;height:12px;margin:2px;' +
     'transform:rotate(45deg);background:var(--panel);' +
-    'border:3px solid var(--navy);box-shadow:0 0 0 1px var(--panel);"></span>',
+    'border:4px solid var(--navy);box-shadow:0 0 0 1px var(--panel);"></span>',
 });
 
 export function StopsLayer({ instance }: { instance: InstanceDetail | null }) {
@@ -245,13 +250,23 @@ export function RouteLayer({ lines, dim }: { lines: RouteLine[]; dim: boolean })
   useEffect(() => {
     if (lines.length === 0) return undefined;
     const group = L.layerGroup();
+
+    // Every casing first, then every core. The map draws paths in the order
+    // they were added — Leaflet's canvas renderer keeps them on a linked list
+    // and repaints it front to back — so interleaving casing, core, casing,
+    // core would let the second vehicle's white casing paint over the first
+    // vehicle's coloured core wherever the two routes share a road. In a
+    // vehicle routing solution they share a great deal: every route leaves and
+    // returns to the same depot down the same few arterials, which is exactly
+    // where the chopping would be most visible. Two passes make the casing a
+    // single ground that all the cores sit on.
+    //
+    // A white casing under each route does two jobs at once: it separates the
+    // route from a congested arterial of a similar hue underneath it, and it
+    // is what stops the route from being swallowed by aerial imagery or by the
+    // dark basemap. Every vehicle hue is dark, so the casing never competes
+    // with the line it carries.
     for (const line of lines) {
-      const color = vehicleColor(line.vehicle);
-      // A white casing under each route does two jobs at once: it separates
-      // the route from a congested arterial of a similar hue underneath it,
-      // and it is what stops the route from being swallowed by aerial imagery
-      // or by the dark basemap. Every vehicle hue is dark, so the casing never
-      // competes with the line it carries.
       group.addLayer(
         L.polyline(line.points, {
           color: casing(),
@@ -260,8 +275,10 @@ export function RouteLayer({ lines, dim }: { lines: RouteLine[]; dim: boolean })
           interactive: false,
         }),
       );
+    }
+    for (const line of lines) {
       const path = L.polyline(line.points, {
-        color,
+        color: vehicleColor(line.vehicle),
         weight: 3.4,
         opacity: dim ? 0.55 : 1,
         dashArray: line.onRoad ? undefined : '6 5',
@@ -270,7 +287,7 @@ export function RouteLayer({ lines, dim }: { lines: RouteLine[]; dim: boolean })
         `Vehicle ${line.vehicle + 1} · ${line.stops.length} stops · ${fmtDistance(line.totalMetres)}` +
           (line.seconds !== null ? ` · ${fmtDuration(line.seconds)}` : '') +
           (line.onRoad ? '' : ' (straight-line approximation)'),
-        { sticky: true, direction: 'top' },
+        { sticky: true, direction: 'top', opacity: 1 },
       );
       group.addLayer(path);
     }
@@ -434,7 +451,7 @@ export function ExactRouteLayer({ route }: { route: ExactRoute | null }) {
     path.bindTooltip(
       `Exact shortest path · ${fmtDistance(route.distance_m)} · ${fmtDuration(route.travel_time_s)} ` +
         `(${fmt(route.delay_ratio, 2)} x free flow) · ${route.nodes_expanded} nodes expanded`,
-      { sticky: true, direction: 'top' },
+      { sticky: true, direction: 'top', opacity: 1 },
     );
     group.addLayer(path);
     group.addTo(map);

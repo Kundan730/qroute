@@ -410,6 +410,7 @@ export function MapPage() {
             attribution={basemap.attribution}
             maxZoom={basemap.maxZoom}
             {...(basemap.subdomains ? { subdomains: basemap.subdomains } : {})}
+            {...(basemap.maxNativeZoom ? { maxNativeZoom: basemap.maxNativeZoom } : {})}
           />
           <EdgeLayer
             edges={map.edges}
