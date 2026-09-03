@@ -63,9 +63,9 @@ results/runs/*/rows.jsonl
 .dockerignore
 Dockerfile
 docker-compose.yml
-.claude/
 .idea/
 .vscode/
+**/.cache/
 **/.DS_Store
 **/*.log
 **/*.prof
