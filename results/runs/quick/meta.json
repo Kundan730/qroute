@@ -1,0 +1,48 @@
+{
+ "config": {
+  "name": "quick",
+  "instances": [
+   "A-n60-k9",
+   "A-n80-k10",
+   "B-n64-k9",
+   "P-n76-k5"
+  ],
+  "algorithms": [
+   "qpso",
+   "pso",
+   "ga",
+   "sa",
+   "random"
+  ],
+  "seeds": 2,
+  "master_seed": 20260920,
+  "max_seconds": 3.0,
+  "max_iterations": 1000000,
+  "workers": 4,
+  "params": {},
+  "output_dir": "results/runs",
+  "save_history": true,
+  "history_stride": 1
+ },
+ "environment": {
+  "python": "3.13.7",
+  "platform": "macOS-26.2-arm64-arm-64bit-Mach-O",
+  "processor": "arm",
+  "cpu_count": 10,
+  "packages": {
+   "numpy": "2.5.2",
+   "scipy": "1.18.1",
+   "numba": "0.67.0",
+   "ortools": "9.15.6755",
+   "networkx": "3.6.1",
+   "osmnx": "2.1.1",
+   "vrplib": "2.2.0",
+   "pyvrp": "0.14.0"
+  },
+  "git_commit": "623524abcdfdbe99e2147720c18bb9a083e80a8a",
+  "git_dirty": true,
+  "timestamp_unix": 1788373362.859829
+ },
+ "n_tasks": 40,
+ "workers": 4
+}

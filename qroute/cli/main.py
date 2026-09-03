@@ -881,6 +881,78 @@ def _instance_json(inst) -> dict:
     }
 
 
+@osm_app.command("fetch")
+def osm_fetch(
+    network: str = typer.Option("all", "--network", "-n",
+                                help="Which network to rebuild, or 'all'."),
+    out_dir: Path = typer.Option(Path("data/osm"), "--out-dir",
+                                 help="Where the .graphml files are written."),
+    force: bool = typer.Option(False, "--force",
+                               help="Rebuild even if the file already exists."),
+) -> None:
+    """Rebuild the bundled road networks from OpenStreetMap.
+
+    The .graphml files are around forty megabytes and are therefore not kept in
+    version control. This command regenerates them from the exact recipe
+    recorded in ``data/osm/networks.json``, so a fresh clone can run the
+    demonstration. It needs an internet connection and takes roughly a minute
+    per network.
+    """
+    import json as _json
+
+    manifest_path = out_dir / "networks.json"
+    if not manifest_path.exists():
+        _fail(f"no manifest at {manifest_path}; it records the recipe for each network")
+    manifest = _json.loads(manifest_path.read_text())
+    available = manifest["networks"]
+
+    wanted = list(available) if network == "all" else [network]
+    unknown = [w for w in wanted if w not in available]
+    if unknown:
+        _fail(f"unknown network {unknown[0]!r}; available: {', '.join(available)}")
+
+    import osmnx as ox
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for name in wanted:
+        spec = available[name]
+        target = out_dir / f"{name}.graphml"
+        if target.exists() and not force:
+            rows.append((name, "already present", "", ""))
+            continue
+        started = time.perf_counter()
+        graph = ox.graph_from_point(
+            tuple(spec["center"]), dist=spec["radius_m"],
+            network_type=spec.get("network_type", "drive"),
+            simplify=spec.get("simplify", True),
+        )
+        graph = ox.add_edge_speeds(graph)
+        graph = ox.add_edge_travel_times(graph)
+        ox.save_graphml(graph, target)
+        elapsed = time.perf_counter() - started
+        n, m = graph.number_of_nodes(), graph.number_of_edges()
+        expected_n = spec.get("expected_nodes_raw")
+        note = ""
+        if expected_n:
+            drift = 100.0 * abs(n - expected_n) / expected_n
+            note = "as recorded" if drift < 2 else f"{drift:.1f}% from recorded {expected_n}"
+        rows.append((name, f"{n} nodes, {m} edges", f"{elapsed:.0f} s", note))
+
+    table = render._table(
+        "Road networks",
+        ("network", {}),
+        ("result", {}),
+        ("time", {"justify": "right"}),
+        ("note", {"style": "dim"}),
+    )
+    for row in rows:
+        table.add_row(*row)
+    out = render.console()
+    out.print(table)
+    out.print("[dim]Data (c) OpenStreetMap contributors, ODbL.[/dim]")
+
+
 @osm_app.command("build")
 def osm_build(
     place_file: Annotated[str, typer.Option("--place-file", "-g",

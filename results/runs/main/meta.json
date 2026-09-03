@@ -1,0 +1,65 @@
+{
+ "config": {
+  "name": "main",
+  "instances": [
+   "P-n16-k8",
+   "P-n23-k8",
+   "A-n32-k5",
+   "A-n33-k5",
+   "A-n37-k5",
+   "A-n39-k5",
+   "A-n45-k7",
+   "A-n54-k7",
+   "A-n65-k9",
+   "A-n80-k10",
+   "B-n50-k7",
+   "B-n78-k10",
+   "P-n76-k4",
+   "P-n101-k4",
+   "X-n101-k25",
+   "X-n153-k22",
+   "X-n200-k36"
+  ],
+  "algorithms": [
+   "qpso",
+   "qiea",
+   "pso",
+   "ga",
+   "sa",
+   "aco",
+   "random",
+   "ortools",
+   "pyvrp"
+  ],
+  "seeds": 10,
+  "master_seed": 20260920,
+  "max_seconds": 20.0,
+  "max_iterations": 1000000,
+  "workers": 9,
+  "params": {},
+  "output_dir": "results/runs",
+  "save_history": true,
+  "history_stride": 10
+ },
+ "environment": {
+  "python": "3.13.7",
+  "platform": "macOS-26.2-arm64-arm-64bit-Mach-O",
+  "processor": "arm",
+  "cpu_count": 10,
+  "packages": {
+   "numpy": "2.5.2",
+   "scipy": "1.18.1",
+   "numba": "0.67.0",
+   "ortools": "9.15.6755",
+   "networkx": "3.6.1",
+   "osmnx": "2.1.1",
+   "vrplib": "2.2.0",
+   "pyvrp": "0.14.0"
+  },
+  "git_commit": "968f3dea848fed401b36f5eb9b7add9cc85f94d3",
+  "git_dirty": false,
+  "timestamp_unix": 1788402995.423348
+ },
+ "n_tasks": 1530,
+ "workers": 9
+}

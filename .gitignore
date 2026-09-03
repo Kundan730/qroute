@@ -15,13 +15,18 @@ node_modules/
 frontend/dist/
 .vite/
 
-# Data caches (large downloads are re-fetchable; keep small curated files under data/)
+# Data caches. The road graphs are ~40 MB and are regenerable: data/osm/networks.json
+# records the exact OSMnx recipe and `qroute osm fetch` rebuilds all three from it.
 data/cache/
 data/osm/*.graphml
 !data/osm/.gitkeep
+!data/osm/networks.json
+!data/osm/index.json
 
-# Results
-results/runs/
+# Results. The raw per-run log of the definitive benchmark is 54 MB, so it is
+# committed gzipped; everything a reader needs to check a number (the summary,
+# the tables, the figures and the provenance) is committed uncompressed.
+results/runs/**/rows.jsonl
 *.log
 
 # OS / editors

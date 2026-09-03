@@ -185,7 +185,9 @@ def load(name_or_path: str | Path, **kwargs) -> Instance:
         return load_solomon(cand, **kwargs)
     raise FileNotFoundError(
         f"instance {stem!r} not found under {CVRP_DIR} or {VRPTW_DIR}. "
-        "Run `qroute data fetch` to download the benchmark sets."
+        "The benchmark sets ship with the repository; if they are missing, either "
+        "the working directory is not the project root (paths are resolved "
+        "relative to it, or to $QROUTE_DATA), or the checkout is incomplete."
     )
 
 

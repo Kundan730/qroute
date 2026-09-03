@@ -1,0 +1,41 @@
+{
+  "_comment": "Exact recipe for every bundled road network. The .graphml files are too large for version control, so this manifest is the source of truth: `qroute osm fetch` regenerates all three from it, and the recorded counts are what a correct regeneration must produce. Extracted from OpenStreetMap via OSMnx; data (c) OpenStreetMap contributors, ODbL.",
+  "osmnx_call": "graph_from_point(center, dist=radius_m, network_type=network_type, simplify=true), then add_edge_speeds and add_edge_travel_times",
+  "networks": {
+    "bengaluru_koramangala": {
+      "description": "Koramangala, Bengaluru",
+      "center": [12.9352, 77.6245],
+      "radius_m": 4000,
+      "network_type": "drive",
+      "simplify": true,
+      "expected_nodes_raw": 13404,
+      "expected_edges_raw": 34353,
+      "expected_nodes_scc": 13343,
+      "expected_edges_scc": 34266,
+      "expected_length_km": 2050
+    },
+    "delhi_connaught": {
+      "description": "Connaught Place, New Delhi",
+      "center": [28.6315, 77.2167],
+      "radius_m": 4000,
+      "network_type": "drive",
+      "simplify": true,
+      "expected_nodes_raw": 7445,
+      "expected_edges_raw": 18500
+    },
+    "chennai_annanagar": {
+      "description": "Anna Nagar, Chennai",
+      "center": [13.0850, 80.2101],
+      "radius_m": 4000,
+      "network_type": "drive",
+      "simplify": true,
+      "expected_nodes_raw": 13132,
+      "expected_edges_raw": 33483
+    }
+  },
+  "notes": [
+    "graph_from_place fails for these areas because the geocoder returns a point rather than a polygon; graph_from_point is used instead.",
+    "Node and edge counts can drift slightly as OpenStreetMap is edited, so an exact match is not required; a large deviation means something else changed.",
+    "The _scc counts are after taking the largest strongly connected component, which the routing layer always does."
+  ]
+}

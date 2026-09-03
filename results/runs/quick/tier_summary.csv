@@ -1,0 +1,6 @@
+Tier,Algorithm,Instances,Runs,Mean gap %,Runs at best known,Mean seconds
+medium (50-99 nodes),ga,4,8,3.33,0/8,3.173
+medium (50-99 nodes),pso,4,8,3.05,0/8,3.143
+medium (50-99 nodes),qpso,4,8,3.34,0/8,3.237
+medium (50-99 nodes),random,4,8,3.22,0/8,3.065
+medium (50-99 nodes),sa,4,8,3.08,0/8,3.020

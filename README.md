@@ -91,12 +91,75 @@ an earlier version of them, is in [docs/findings.md](docs/findings.md).
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
+pytest
+```
+
+Run every command from the project root: data paths resolve relative to it, or
+to `$QROUTE_DATA` if you set it.
+
+## Running it
+
+Solve one instance and see the routes, the gap and the convergence:
+
+```bash
+qroute solve A-n32-k5 --seconds 10
+```
+
+Compare several solvers on one instance, with a significance test:
+
+```bash
+qroute compare A-n80-k10 --algorithms qpso,qiea,pso,ga,sa --seeds 5 --seconds 10
+```
+
+Start the web platform, then open http://127.0.0.1:8000:
+
+```bash
+qroute serve
+```
+
+Run the demonstration: plan under morning traffic on a real road network, break
+a road, and re-optimise from a warm start:
+
+```bash
+qroute osm demo --network bengaluru_koramangala --hour 9 --customers 40 --seed 3
+```
+
+Prove optimality on a small instance, so "near-optimal" can be checked:
+
+```bash
+qroute exact P-n16-k8 --seconds 60
+```
+
+Reproduce the full benchmark. This takes about an hour on ten cores, because
+every one of the 1,530 runs gets its full budget:
+
+```bash
+qroute bench --config configs/main.yaml
+```
+
+Then turn it into tables and figures:
+
+```bash
+qroute report results/runs/main --format markdown --plots
 ```
 
 ## Data
 
-Benchmark instances (CVRPLIB sets A, B, P, X and the Solomon VRPTW set) and three
-Indian city road graphs are held under `data/`.
+The benchmark instances (CVRPLIB sets A, B, P, X and the Solomon set) ship with
+the repository, 277 files with their best-known solutions.
+
+The three road networks are about forty megabytes and are not in version
+control. `data/osm/networks.json` records the exact recipe for each, and this
+rebuilds them in about a minute each:
+
+```bash
+qroute osm fetch
+```
+
+The raw per-run log of the definitive benchmark is committed gzipped as
+`results/runs/main/rows.jsonl.gz`; everything needed to check a number, the
+summary, the tables, the figures and the environment fingerprint, is committed
+uncompressed alongside it.
 
 ## Licence
 
