@@ -34,28 +34,32 @@ by an optimal split, and refined by granular local search.
 
 1,520 benchmark runs over 17 instances, 9 solvers and 10 seeds, at an equal
 twenty-second budget with every run pinned to one thread. No run returned an
-infeasible solution. Friedman over 16 instances gives p = 1.25e-09.
+infeasible solution. Friedman over 16 instances gives p = 1.72e-09.
 
 | Solver | Mean gap to best known | Reached best known |
 | --- | ---: | ---: |
-| PyVRP, hybrid genetic search | 0.24% | 120/170 |
-| **Quantum rotation gate (ours)** | 0.65% | 104/170 |
-| Genetic algorithm | 0.66% | 105/170 |
-| Ant colony optimisation | 0.77% | 100/170 |
-| **Quantum particle swarm (ours)** | 0.85% | 100/170 |
-| Simulated annealing | 0.93% | 81/170 |
-| Classical particle swarm | 0.99% | 80/170 |
-| Random multi-start | 1.21% | 77/170 |
-| OR-Tools guided local search | 2.23% | 60/160 |
+| PyVRP, hybrid genetic search | 0.23% | 116/170 |
+| Genetic algorithm | 0.66% | 103/170 |
+| **Quantum rotation-gate engine (ours)** | 0.70% | 104/170 |
+| Ant colony optimisation | 0.77% | 98/170 |
+| **Quantum particle swarm (ours)** | 0.87% | 96/170 |
+| Simulated annealing | 0.94% | 78/170 |
+| Classical particle swarm | 1.03% | 79/170 |
+| Random multi-start | 1.22% | 77/170 |
+| OR-Tools guided local search | 1.93% | 60/160 |
 
 The comparison the problem statement asks for is the quantum-behaved swarm
 against the classical one it derives from, under an identical decoder, local
-search and budget. It comes out positive: 0.85% against 0.99%, p = 1.4e-05 over
-170 paired runs. It also beats simulated annealing and multi-start local search.
+search and budget. It comes out positive: 0.87% against 1.03%, p = 1.3e-06 over
+170 paired runs. It also significantly beats simulated annealing, multi-start
+local search and OR-Tools.
 
-It does **not** beat the genetic algorithm or ant colony optimisation, and it is
-well behind PyVRP, a specialised state-of-the-art solver. Those results are on
-every table rather than omitted.
+The rotation-gate engine does better: it is statistically indistinguishable from
+the genetic algorithm (p = 0.087) and significantly beats every other classical
+method except ant colony optimisation.
+
+Neither beats PyVRP, a specialised state-of-the-art solver, and neither is
+claimed to. Those results are on every table rather than omitted.
 
 Also established:
 

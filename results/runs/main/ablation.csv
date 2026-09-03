@@ -1,0 +1,3 @@
+Variant,What changed,Instances,Runs,Mean gap %,Change vs full method,Runs at best known,Mean seconds
+qpso,full method: quantum-behaved swarm with local search,17,170,0.87,—,96/170,20.116
+random,control: random restart with the same local search,17,170,1.22,+0.35,77/170,20.037

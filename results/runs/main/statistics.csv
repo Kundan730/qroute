@@ -1,0 +1,10 @@
+Algorithm,Mean rank,Holm-corrected p vs control,Effect size,Finding
+pyvrp,3.53,—,—,control algorithm (lowest mean rank)
+ga,3.78,0.172,0.87,no significant difference from pyvrp at alpha = 0.05 (n = 16 instances)
+qiea,3.97,0.172,0.90,no significant difference from pyvrp at alpha = 0.05 (n = 16 instances)
+aco,4.12,0.345,0.43,no significant difference from pyvrp at alpha = 0.05 (n = 16 instances)
+qpso,4.81,0.172,1.00,no significant difference from pyvrp at alpha = 0.05 (n = 16 instances)
+sa,5.50,0.0898,1.00,no significant difference from pyvrp at alpha = 0.05 (n = 16 instances)
+pso,5.66,0.082,1.00,no significant difference from pyvrp at alpha = 0.05 (n = 16 instances)
+random,6.12,0.082,1.00,no significant difference from pyvrp at alpha = 0.05 (n = 16 instances)
+ortools,7.50,0.0405,1.00,"pyvrp beats ortools significantly (n = 16 instances, effect size 1.00)"

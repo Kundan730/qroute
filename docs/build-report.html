@@ -282,7 +282,7 @@
 <div class="band">
   <div class="wrap">
     <div class="figs">
-      <div class="fig"><b>1,520</b><span>benchmark runs, 17 instances &times; 9 solvers &times; 10 seeds</span></div>
+      <div class="fig"><b>1,520</b><span>benchmark runs, 17 instances &times; 9 solvers &times; 10 seeds, all at a genuine 20 s</span></div>
       <div class="fig"><b>0</b><span>infeasible solutions reported</span></div>
       <div class="fig"><b>13,343</b><span>road intersections in the live demonstration network</span></div>
       <div class="fig"><b>138</b><span>published optima reproduced exactly by our objective</span></div>
@@ -356,15 +356,15 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td class="rank">1</td><td>PyVRP &mdash; hybrid genetic search</td><td class="num">0.24%</td><td class="num">120/170</td><td><div class="bar"><i style="width:12px"></i></div></td></tr>
-          <tr class="ours"><td class="rank">2</td><td><strong>Quantum rotation gate</strong> &mdash; ours</td><td class="num">0.65%</td><td class="num">104/170</td><td><div class="bar"><i style="width:32px"></i></div></td></tr>
-          <tr><td class="rank">3</td><td>Genetic algorithm</td><td class="num">0.66%</td><td class="num">105/170</td><td><div class="bar"><i style="width:33px"></i></div></td></tr>
-          <tr><td class="rank">4</td><td>Ant colony optimisation</td><td class="num">0.77%</td><td class="num">100/170</td><td><div class="bar"><i style="width:38px"></i></div></td></tr>
-          <tr class="ours"><td class="rank">5</td><td><strong>Quantum particle swarm</strong> &mdash; ours</td><td class="num">0.85%</td><td class="num">100/170</td><td><div class="bar"><i style="width:42px"></i></div></td></tr>
-          <tr><td class="rank">6</td><td>Simulated annealing</td><td class="num">0.93%</td><td class="num">81/170</td><td><div class="bar"><i style="width:46px"></i></div></td></tr>
-          <tr><td class="rank">7</td><td>Classical particle swarm</td><td class="num">0.99%</td><td class="num">80/170</td><td><div class="bar"><i style="width:49px"></i></div></td></tr>
-          <tr><td class="rank">8</td><td>Random multi-start</td><td class="num">1.21%</td><td class="num">77/170</td><td><div class="bar"><i style="width:60px"></i></div></td></tr>
-          <tr><td class="rank">9</td><td>OR-Tools guided local search</td><td class="num">2.23%</td><td class="num">60/160</td><td><div class="bar"><i style="width:110px"></i></div></td></tr>
+          <tr><td class="rank">1</td><td>PyVRP &mdash; hybrid genetic search</td><td class="num">0.23%</td><td class="num">116/170</td><td><div class="bar"><i style="width:12px"></i></div></td></tr>
+          <tr><td class="rank">2</td><td>Genetic algorithm</td><td class="num">0.66%</td><td class="num">103/170</td><td><div class="bar"><i style="width:34px"></i></div></td></tr>
+          <tr class="ours"><td class="rank">3</td><td><strong>Quantum rotation gate</strong> &mdash; ours</td><td class="num">0.70%</td><td class="num">104/170</td><td><div class="bar"><i style="width:36px"></i></div></td></tr>
+          <tr><td class="rank">4</td><td>Ant colony optimisation</td><td class="num">0.77%</td><td class="num">98/170</td><td><div class="bar"><i style="width:40px"></i></div></td></tr>
+          <tr class="ours"><td class="rank">5</td><td><strong>Quantum particle swarm</strong> &mdash; ours</td><td class="num">0.87%</td><td class="num">96/170</td><td><div class="bar"><i style="width:45px"></i></div></td></tr>
+          <tr><td class="rank">6</td><td>Simulated annealing</td><td class="num">0.94%</td><td class="num">78/170</td><td><div class="bar"><i style="width:48px"></i></div></td></tr>
+          <tr><td class="rank">7</td><td>Classical particle swarm</td><td class="num">1.03%</td><td class="num">79/170</td><td><div class="bar"><i style="width:53px"></i></div></td></tr>
+          <tr><td class="rank">8</td><td>Random multi-start</td><td class="num">1.22%</td><td class="num">77/170</td><td><div class="bar"><i style="width:63px"></i></div></td></tr>
+          <tr><td class="rank">9</td><td>OR-Tools guided local search</td><td class="num">1.93%</td><td class="num">60/160</td><td><div class="bar"><i style="width:99px"></i></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -379,13 +379,13 @@
         <span class="tag c">Confirmed</span>
         <h3>The quantum-behaved swarm beats the classical swarm it derives from</h3>
         <p>Under an identical decoder, local search and budget, across 170 paired runs. This is the comparison the brief actually asks for.</p>
-        <p class="stat">0.85% against 0.99% &middot; p = 1.4&times;10&#8315;&#8309; &middot; effect size 0.57</p>
+        <p class="stat">0.87% against 1.03% &middot; p = 1.3&times;10&#8315;&#8310; &middot; effect size 0.62</p>
       </article>
       <article class="claim">
         <span class="tag c">Confirmed</span>
-        <h3>It also beats simulated annealing and multi-start local search</h3>
-        <p>Both significant after Holm correction for multiple comparisons.</p>
-        <p class="stat">vs annealing p = 0.0016 &middot; vs multi-start p = 1.7&times;10&#8315;&#8312;</p>
+        <h3>It also beats simulated annealing, multi-start local search and OR-Tools</h3>
+        <p>All significant after Holm correction for multiple comparisons. The rotation-gate engine does better still: it is statistically indistinguishable from the genetic algorithm, the strongest classical method here.</p>
+        <p class="stat">vs annealing p = 0.0028 &middot; vs multi-start p = 6.5&times;10&#8315;&#8313; &middot; vs OR-Tools p = 5.2&times;10&#8315;&#185;&#8310; &middot; rotation gate vs GA p = 0.087, not separable</p>
       </article>
       <article class="claim">
         <span class="tag c">Confirmed</span>
@@ -396,7 +396,7 @@
       <article class="claim">
         <span class="tag b">Bounded</span>
         <h3>It does not beat every classical method</h3>
-        <p>The genetic algorithm and ant colony optimisation are both significantly better. PyVRP, a specialised state-of-the-art solver, is far ahead at 0.24%. Every table says so.</p>
+        <p>The genetic algorithm and ant colony optimisation are both significantly better than the swarm. PyVRP, a specialised state-of-the-art solver, is ahead of everything at 0.23%. Every table says so.</p>
       </article>
       <article class="claim">
         <span class="tag r">Refuted</span>
@@ -440,6 +440,11 @@
         <h3>A repair pass undid its own work</h3>
         <p>After splitting off an overloaded route, it polished the result under ordinary penalties, which merged the routes again. Forty forced overloads left three unrepaired; all forty now repair.</p>
         <p class="found">Its failures were also being swallowed by a bare exception handler.</p>
+      </article>
+      <article class="defect">
+        <h3>Three solvers never received the budget they were credited with</h3>
+        <p>The benchmark dispatcher inspected a thin wrapper's parameter names, found neither the time budget nor the seed among them, and forwarded neither. PyVRP and OR-Tools ran at their own ten-second defaults against everyone else's twenty, and PyVRP got seed zero for all ten of its supposedly independent runs. The fairness claim on which the whole comparison rests was false.</p>
+        <p class="found">Dropping a keyword argument raises nothing, so a verification pass had already missed it. Every figure on this page is from the corrected re-run.</p>
       </article>
       <article class="defect">
         <h3>Concurrent requests bypassed the run limit</h3>

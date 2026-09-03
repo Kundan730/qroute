@@ -228,55 +228,74 @@ as an option, documented as unsupported.
 
 ## 6. The definitive benchmark
 
+**This run replaces an earlier one that was not a fair comparison.** The
+dispatcher inspected a thin wrapper's parameter names, found neither the budget
+nor the seed among them, and forwarded neither, so PyVRP and OR-Tools ran at
+their own ten-second defaults against everyone else's twenty and PyVRP received
+seed 0 for all ten of its supposedly independent runs. Dropping a keyword
+argument raises nothing, which is why it survived a verification pass. The
+figures below are from the corrected run, in which elapsed time tracks the
+budget for every solver and PyVRP's answers vary with the seed.
+
+Worth recording: the correction did **not** materially change any conclusion.
+OR-Tools improved from 2.23% to 1.93% with its full budget, PyVRP was unchanged
+at 0.23% because it converges long before either limit, and the ranking moved
+only in that the genetic algorithm and the rotation-gate engine swapped second
+and third. The bug was real and had to be fixed; it was not load-bearing.
+
 Seventeen instances, nine solvers, ten seeds each, an equal twenty-second
-wall-clock budget, every run pinned to one thread. 1,520 completed runs. No run
-returned an infeasible solution. OR-Tools failed to produce any solution on
-X-n153-k22 in all ten seeds, which is reported as "no solution found" rather
-than folded into an average.
+wall-clock budget, every run pinned to one thread. 1,520 completed runs, none
+infeasible. OR-Tools found no solution at all on X-n153-k22 in all ten seeds,
+reported as "no solution found" rather than folded into an average.
 
 Friedman mean ranks over the sixteen instances every solver scored, lower being
-better, omnibus p = 1.25e-09:
+better, omnibus p = 1.72e-09:
 
-| Rank | Solver | Mean rank | Mean gap |
-| ---: | :--- | ---: | ---: |
-| 1 | PyVRP, hybrid genetic search | 3.53 | 0.24% |
-| 2 | Genetic algorithm | 3.66 | 0.66% |
-| 3 | **Quantum rotation-gate engine (QIEA)** | 4.12 | 0.65% |
-| 4 | Ant colony optimisation | 4.19 | 0.77% |
-| 5 | **Quantum particle swarm (QPSO)** | 4.66 | 0.85% |
-| 6 | Simulated annealing | 5.47 | 0.93% |
-| 7 | Classical particle swarm | 5.69 | 0.99% |
-| 8 | Random multi-start | 6.19 | 1.21% |
-| 9 | OR-Tools guided local search | 7.50 | — |
+| Rank | Solver | Mean rank | Mean gap | Reached best known |
+| ---: | :--- | ---: | ---: | ---: |
+| 1 | PyVRP, hybrid genetic search | 3.53 | 0.23% | 116/170 |
+| 2 | Genetic algorithm | 3.78 | 0.66% | 103/170 |
+| 3 | **Quantum rotation-gate engine** | 3.97 | 0.70% | 104/170 |
+| 4 | Ant colony optimisation | 4.12 | 0.77% | 98/170 |
+| 5 | **Quantum particle swarm** | 4.81 | 0.87% | 96/170 |
+| 6 | Simulated annealing | 5.50 | 0.94% | 78/170 |
+| 7 | Classical particle swarm | 5.66 | 1.03% | 79/170 |
+| 8 | Random multi-start | 6.12 | 1.22% | 77/170 |
+| 9 | OR-Tools guided local search | 7.50 | 1.93% | 60/160 |
 
-QPSO against every other solver, paired by instance and seed, 170 pairs each,
-Holm-corrected:
+QPSO against every other solver, paired by instance and seed, Holm-corrected.
+The OR-Tools row has 160 pairs rather than 170 because its ten failed runs
+cannot be paired:
 
 | Comparison | Result |
 | --- | --- |
-| QPSO vs classical PSO | **QPSO better**, p = 1.4e-05, effect 0.57 |
-| QPSO vs simulated annealing | **QPSO better**, p = 0.0016, effect 0.43 |
-| QPSO vs random multi-start | **QPSO better**, p = 1.7e-08, effect 0.72 |
-| QPSO vs OR-Tools | **QPSO better**, p = 8.7e-18, effect 0.96 |
-| QPSO vs ant colony | ACO better, p = 0.0027, effect 0.40 |
-| QPSO vs quantum rotation gate | QIEA better, p = 5.8e-06, effect 0.68 |
-| QPSO vs genetic algorithm | GA better, p = 5.8e-06, effect 0.69 |
-| QPSO vs PyVRP | PyVRP better, p = 1.3e-11, effect 0.96 |
+| QPSO vs classical PSO | **QPSO better**, p = 1.3e-06, effect 0.62 |
+| QPSO vs simulated annealing | **QPSO better**, p = 0.0028, effect 0.37 |
+| QPSO vs random multi-start | **QPSO better**, p = 6.5e-09, effect 0.74 |
+| QPSO vs OR-Tools | **QPSO better**, p = 5.2e-16, effect 0.95 |
+| QPSO vs ant colony | ACO better, p = 0.0027, effect 0.43 |
+| QPSO vs rotation-gate engine | QIEA better, p = 2.7e-05, effect 0.62 |
+| QPSO vs genetic algorithm | GA better, p = 1.3e-06, effect 0.71 |
+| QPSO vs PyVRP | PyVRP better, p = 3.7e-11, effect 0.91 |
 
-The comparison the problem statement actually asks for is the first one, and it
-comes out positive: the quantum-behaved swarm significantly outperforms the
-classical particle swarm it is derived from, under an identical decoder, an
-identical local search and an identical budget. It also beats simulated
-annealing and the multi-start control.
+The comparison the problem statement asks for is the first one, and it is
+positive: the quantum-behaved swarm significantly outperforms the classical
+particle swarm it is derived from, under an identical decoder, an identical
+local search and an identical budget.
 
-It does not beat the genetic algorithm or ant colony optimisation, and it is
-well behind PyVRP, which is a specialised state-of-the-art solver for this exact
-problem. Both quantum-inspired engines nevertheless place above every classical
-swarm and single-trajectory method tested.
+The rotation-gate engine does better still. It significantly beats classical PSO
+(p = 4.7e-11), simulated annealing (p = 6.8e-08) and multi-start local search
+(p = 2.8e-14), and is **statistically indistinguishable from the genetic
+algorithm** (p = 0.087), the strongest classical metaheuristic in the set.
+
+So both quantum-inspired engines place above every classical swarm and
+single-trajectory method tested, and the better of the two ties with the best
+classical population method. Neither approaches PyVRP, which is a specialised
+state-of-the-art solver for this exact problem and is ahead of everything.
 
 Eight of the seventeen instances are solved to the best-known value by nearly
-every solver, which is why the small tier is retained: it disqualifies anything
-that fails there rather than distinguishing the rest.
+every solver. The small tier is retained because it disqualifies anything that
+fails there, not because it separates the rest.
 
 ---
 
@@ -294,15 +313,19 @@ Supported by measurement:
 * The classical contraction range is wrong for a random-key encoding, and
   correcting it is a significant improvement, confirmed twice at p = 0.00013
   over 80 and 88 paired runs.
-* QPSO significantly outperforms classical PSO, simulated annealing and
-  multi-start local search on the full benchmark, at p = 1.4e-05 or better.
+* QPSO significantly outperforms classical PSO, simulated annealing,
+  multi-start local search and OR-Tools on the full benchmark, at p = 0.0028 or
+  better after Holm correction.
+* The rotation-gate engine is statistically indistinguishable from the genetic
+  algorithm (p = 0.087) and significantly beats every other classical method
+  except ant colony optimisation.
 
 Not supported, and therefore not claimed:
 
 * That QPSO beats every classical metaheuristic. It does not: the genetic
   algorithm and ant colony optimisation are both significantly better.
-* That it approaches the state of the art. PyVRP is far ahead, at 0.24 percent
-  against 0.85, and the report says so on every table.
+* That either engine approaches the state of the art. PyVRP is ahead of
+  everything, at 0.23 percent against 0.70 for the better of the two.
 * That the correct coefficient scales with instance size. That was predicted
   and tested, and the prediction failed.
 * Any claim of quantum advantage, or of quantum hardware being involved.

@@ -1,0 +1,28 @@
+Tier,Algorithm,Instances,Runs,Mean gap %,Runs at best known,Mean seconds
+small (< 50 nodes),aco,7,70,0.16,66/70,20.009
+small (< 50 nodes),ga,7,70,0.11,68/70,20.023
+small (< 50 nodes),ortools,7,70,0.29,50/70,20.002
+small (< 50 nodes),pso,7,70,0.04,59/70,20.031
+small (< 50 nodes),pyvrp,7,70,0.00,70/70,20.005
+small (< 50 nodes),qiea,7,70,0.00,70/70,20.017
+small (< 50 nodes),qpso,7,70,0.15,68/70,20.024
+small (< 50 nodes),random,7,70,0.17,60/70,20.012
+small (< 50 nodes),sa,7,70,0.19,60/70,20.005
+medium (50-99 nodes),aco,6,60,0.19,24/60,20.016
+medium (50-99 nodes),ga,6,60,0.24,25/60,20.062
+medium (50-99 nodes),ortools,6,60,2.85,10/60,20.001
+medium (50-99 nodes),pso,6,60,0.91,18/60,20.096
+medium (50-99 nodes),pyvrp,6,60,0.20,37/60,20.013
+medium (50-99 nodes),qiea,6,60,0.22,24/60,20.042
+medium (50-99 nodes),qpso,6,60,0.59,21/60,20.088
+medium (50-99 nodes),random,6,60,1.01,17/60,20.031
+medium (50-99 nodes),sa,6,60,0.76,18/60,20.007
+large (>= 100 nodes),aco,4,40,2.72,8/40,20.065
+large (>= 100 nodes),ga,4,40,2.28,10/40,20.163
+large (>= 100 nodes),ortools,4,30,3.90,0/30,20.008
+large (>= 100 nodes),pso,4,40,2.94,2/40,20.294
+large (>= 100 nodes),pyvrp,4,40,0.69,9/40,20.037
+large (>= 100 nodes),qiea,4,40,2.62,10/40,20.146
+large (>= 100 nodes),qpso,4,40,2.54,7/40,20.317
+large (>= 100 nodes),random,4,40,3.36,0/40,20.090
+large (>= 100 nodes),sa,4,40,2.52,0/40,20.024
