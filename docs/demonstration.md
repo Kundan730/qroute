@@ -100,24 +100,29 @@ reports the feasible, more expensive plan, not the cheaper impossible one.
 
 ## 5. Disrupt it
 
-One lane is blocked on fifteen road segments that the current routes actually
-use, for ninety minutes. Travel time on those segments rises by a factor of 49 on
-average, because the volume-delay function grows with the fourth power of
-saturation and those links were already near capacity.
+> **These figures are being re-measured and are not currently quoted.** An audit
+> found that the numbers previously printed here came from an ad-hoc script
+> rather than from the `qroute osm demo` command section 7 tells you to run, and
+> did not reproduce from it. Two further statements in this section were wrong on
+> their face and have been removed: the disruption was described as a blocked
+> lane when the code injects a speed reduction, and the resulting slowdown was
+> given as a factor of 49, which a speed multiplier of 0.1 cannot produce because
+> it caps the increase at ten-fold. The correct description of the mechanism is
+> below; the table returns when it has been regenerated from the documented
+> command with every flag pinned.
 
-| Step | Result |
-| --- | --- |
-| Travel-time matrix rebuilt | 0.48 seconds |
-| Cost of keeping the existing plan | 2,105 vehicle-minutes, 6.0% worse |
-| Re-optimised cold, 2 seconds | 2,074 vehicle-minutes, recovers 1.4% |
-| Re-optimised **warm**, 2 seconds | 2,030 vehicle-minutes, recovers 3.6% |
+What the demonstration actually does: it selects the road segments the current
+plan uses most heavily, applies a **slowdown event** that cuts their speed to a
+tenth for ninety minutes, and applies a milder reduction to adjacent links.
+This is a speed reduction, not a capacity reduction, so the volume-delay
+function is not what produces the effect and the travel time on an affected
+segment rises by at most a factor of ten.
 
-The warm start is the point. Seeding the swarm from the previous solution and
-letting it adapt recovers more than twice as much as starting from scratch in the
-same two seconds. That is the argument for keeping an optimiser resident and
-warm in a live traffic system rather than re-solving from nothing on every event.
-
----
+The platform then rebuilds the travel-time matrices under the new weights,
+prices the existing plan against them, and re-optimises both from scratch and
+from a warm start seeded with the previous solution. The command prints all
+three costs and states plainly which start won, including when the warm start
+loses.
 
 ## 6. What a viewer should take away
 
@@ -125,8 +130,9 @@ warm in a live traffic system rather than re-solving from nothing on every event
    standard one with published coefficients.
 2. The optimiser produces a feasible plan, and when it cannot, it says so rather
    than quietly reporting an impossible one.
-3. When the road network changes, the plan can be repaired in about two seconds,
-   and warm starting is measurably better than restarting.
+3. When the road network changes, the plan can be re-optimised in seconds, and
+   the command reports honestly whether warm starting beat a cold restart on
+   that run rather than assuming it did.
 4. Every claim on screen is a number the platform computed and can recompute.
 
 ## 7. Reproducing it

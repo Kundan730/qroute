@@ -454,19 +454,12 @@
     <p class="lede">Forty deliveries across Koramangala, Bengaluru, under morning traffic, then disrupted.</p>
     <div class="grid2">
       <div>
-        <div class="scroll">
-          <table>
-            <caption>Response to a lane blockage</caption>
-            <thead><tr><th scope="col">Step</th><th scope="col" class="num">Vehicle-minutes</th></tr></thead>
-            <tbody>
-              <tr><td>Optimised plan at 09:00</td><td class="num">1,987</td></tr>
-              <tr><td>After one lane blocked on 15 links in use</td><td class="num">2,105</td></tr>
-              <tr><td>Re-optimised cold, 2 s</td><td class="num">2,074</td></tr>
-              <tr><td class="ours"><strong>Re-optimised warm, 2 s</strong></td><td class="num"><strong>2,030</strong></td></tr>
-            </tbody>
-          </table>
+        <div class="callout">
+          <h3>These figures are being re-measured</h3>
+          <p>An audit found that the disruption table previously shown here came from an ad-hoc script rather than from the documented command, and did not reproduce from it. Two statements were also wrong on their face: the disruption was described as a blocked lane when the code injects a speed reduction, and the slowdown was given as a factor of 49, which a speed multiplier of one tenth cannot produce because it caps the increase at ten-fold.</p>
+          <p>The numbers return when they have been regenerated from the documented command with every flag pinned. Nothing unverified is quoted in the meantime.</p>
         </div>
-        <p style="margin-top:1.2rem">Warm starting from the previous solution recovers more than twice as much as restarting from scratch in the same two seconds. That is the argument for keeping an optimiser resident in a live traffic system.</p>
+        <p style="margin-top:1.2rem">The mechanism is real and implemented: the platform rebuilds its travel-time matrices under the new weights, prices the existing plan against them, and re-optimises both cold and from a warm start seeded with the previous solution. The command reports which start won on that run, including when the warm start loses.</p>
       </div>
       <div>
         <div class="callout">
