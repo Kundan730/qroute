@@ -100,7 +100,11 @@ jobs:
           # An orphan commit: the Space carries the current state, not this
           # repository's history.
           git checkout --orphan space-deploy
-          git rm -r --cached . > /dev/null
+          # -f because the previous step edited Dockerfile and README.md, so
+          # their staged content differs from both the working tree and HEAD.
+          # Clearing the index is what lets LFS claim the binary below: a file
+          # already staged as a blob is never converted to a pointer.
+          git rm -r --cached -f . > /dev/null
 
           # The one binary the application genuinely needs. Tracking it before
           # it is staged is what makes it a pointer rather than a blob.
