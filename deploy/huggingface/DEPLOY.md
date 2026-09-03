@@ -1,154 +1,193 @@
 # Deploying qroute to Hugging Face Spaces
 
-The whole process, start to finish. It takes about twenty minutes, most of which
-is the image building on Hugging Face's side.
+The complete process. Budget about forty minutes, most of which is the image
+building on Hugging Face's side while you do something else.
 
-**No API key is required.** Nothing in the platform needs credentials to run:
-the base maps come from Esri's free tile services, the benchmark instances ship
-with the image, and traffic is simulated. A live traffic feed is supported and
-optional; see step 7.
+## Before you start: this needs PRO
+
+Hugging Face made Docker and Gradio Spaces a paid feature. **Static Spaces are
+free; Docker Spaces are not.** qroute is a Python service with a compiled
+optimiser, so it needs Docker, which means a PRO account at **$9/month**,
+cancellable whenever you like.
+
+What that buys, and why it is a reasonable trade for this project:
+
+* 16 GB of memory against the roughly 410 MB the service needs, so memory never
+  becomes something you think about.
+* A public HTTPS URL a judge can open, with no server for you to administer.
+* Nothing to keep patched, no firewall to configure, no certificate to renew.
+
+If you would rather not pay, `deploy/vps/DEPLOY.md` runs the same image on a
+Hetzner box for about €4/month, and `deploy/oracle/DEPLOY.md` covers Oracle's
+permanently free tier. Both need a card or PayPal and rather more setup.
+
+**No API key is required for the application itself.** Base maps come from
+Esri's free tile services, the benchmark instances ship inside the image, and
+traffic is simulated. A live traffic feed is optional; see step 8.
 
 ---
 
-## Why Spaces
+## 1. Subscribe to PRO
 
-Its free CPU tier gives 2 vCPU and 16 GB of memory. The service needs about
-313 MB idle and roughly 700 MB with one city loaded, so there is a great deal of
-headroom. Spaces builds a Dockerfile directly, gives a public URL that can be
-handed to a judge, and only sleeps after 48 hours of inactivity rather than the
-15 minutes typical of other free tiers.
+<https://huggingface.co/pricing> → **Get Pro**. Payment is handled by Stripe,
+which accepts most debit as well as credit cards.
 
----
+## 2. Create the Space
 
-## 1. Create the Space
-
-At <https://huggingface.co/new-space>:
+<https://huggingface.co/new-space>:
 
 | Field | Value |
 | --- | --- |
 | Owner | your account |
 | Space name | `qroute` |
-| License | MIT |
-| SDK | **Docker** — not Gradio or Streamlit |
-| Template | Blank |
-| Hardware | CPU basic, free |
-| Visibility | Public |
+| Short description | Quantum-inspired vehicle routing on real road networks |
+| License | `mit` |
+| Space SDK | **Docker** → **Blank** |
+| Hardware | CPU basic (free with PRO) |
+| Visibility | **Public** |
 
-## 2. Clone it
+Public matters: a private Space cannot be opened by a judge without an account.
+
+## 3. Clone the Space
 
 ```bash
 git clone https://huggingface.co/spaces/YOUR_USERNAME/qroute hf-qroute
 cd hf-qroute
 ```
 
-If you are asked for a password, use an access token from
-<https://huggingface.co/settings/tokens> with write permission, not your account
-password.
+When it asks for a password, give an access token from
+<https://huggingface.co/settings/tokens> with **write** permission. Your account
+password will not work.
 
-## 3. Copy the project in
+## 4. Copy the project across
 
-From the directory holding this repository:
+From the directory that holds this repository:
 
 ```bash
 rsync -a --exclude='.git' --exclude='.venv' --exclude='node_modules' \
       --exclude='frontend/dist' --exclude='data/osm/*.graphml' \
+      --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.ruff_cache' \
       ./ ../hf-qroute/
 ```
 
-`.venv` and `node_modules` are rebuilt inside the image, `frontend/dist` is
-built during the image build, and the road graphs are fetched at runtime.
+Everything excluded is either rebuilt during the image build or fetched by it.
 
-## 4. Add the Space's README
+## 5. Bake the road graphs into the image
 
-Hugging Face reads its configuration from YAML at the top of `README.md`. Copy
-the prepared one over the project's own:
+This step is specific to Spaces and matters. Spaces gives no persistent disk on
+the standard tiers, so anything fetched at runtime is lost on every restart, and
+the next visitor waits several minutes looking at a map with no roads on it.
+
+In the Space copy, turn on the build flag that puts them in the image:
+
+```bash
+cd ../hf-qroute
+sed -i '' 's/^ARG BAKE_OSM=0$/ARG BAKE_OSM=1/' Dockerfile   # macOS
+# on Linux: sed -i 's/^ARG BAKE_OSM=0$/ARG BAKE_OSM=1/' Dockerfile
+grep -n 'ARG BAKE_OSM' Dockerfile      # confirm it now reads 1
+```
+
+It adds about 40 MB to the image and three minutes to the build, and the
+container then starts ready to draw a city.
+
+## 6. Add the Space's README
+
+Hugging Face reads its configuration from YAML at the top of `README.md`:
 
 ```bash
 cp deploy/huggingface/README.md README.md
 ```
 
-The block that matters is `sdk: docker` and `app_port: 8000`. The port must
-match what the container listens on, which the root `Dockerfile` sets through
+The two lines that matter are `sdk: docker` and `app_port: 8000`. The port must
+match what the container listens on, which the Dockerfile sets through
 `QROUTE_PORT`.
 
-## 5. Enable Git LFS for the large files
+## 7. Push
 
-The committed benchmark log is a few megabytes and Hugging Face wants files over
-10 MB in LFS:
+The benchmark log is over Hugging Face's 10 MB inline limit, so track it in LFS
+first:
 
 ```bash
 git lfs install
 git lfs track "results/runs/main/rows.jsonl.gz"
-git lfs track "*.graphml"
 git add .gitattributes
-```
-
-## 6. Push
-
-```bash
 git add -A
 git commit -m "Deploy qroute"
 git push
 ```
 
-The build starts immediately. Watch it under the **Logs** tab of the Space. It
-takes ten to fifteen minutes: most of it is installing SciPy, OR-Tools and
-Numba, and the final step solves a benchmark instance to compile the kernels
-into the image so the first visitor does not wait for them.
+The build starts immediately. Watch it under the Space's **Logs** tab, then
+**Building**. Expect fifteen to twenty-five minutes: installing SciPy, OR-Tools
+and Numba is most of it, then the frontend build, then a real benchmark solve
+that compiles the optimiser's kernels into the image so your first visitor does
+not pay for them, then the road graphs.
 
-## 7. Optional: live traffic
+## 8. Optional: live traffic
 
-Everything works without this. To replace the simulated traffic with a live
-feed, add a free key from <https://developer.tomtom.com> under
+Everything works without this; traffic is simulated from a calibrated
+time-of-day profile and the interface says so. To use a live feed instead, get a
+free key from <https://developer.tomtom.com> and add it under
 **Settings → Variables and secrets → New secret**:
 
 | Name | Value |
 | --- | --- |
 | `TOMTOM_API_KEY` | your key |
 
-Use a *secret*, not a variable: variables are visible to anyone who can see the
-Space. Without the key the platform falls back to simulation and labels itself
-as simulated rather than pretending otherwise.
+Use a **secret**, not a variable. Variables are visible to anyone who can see
+the Space. Without the key the platform falls back to simulation and labels
+itself accordingly rather than presenting simulated data as observed.
 
-## 8. Check it worked
+## 9. Check it
 
 ```bash
 curl https://YOUR_USERNAME-qroute.hf.space/api/health
 ```
 
-A healthy response reports `"status": "ok"` along with the number of instances
-and networks it found. Then open the Space itself: the map should draw a city,
-the time-of-day slider should recolour the roads, and **Generate instance**
-followed by **Optimise** should produce routes in about ten seconds.
+A healthy reply carries `"status": "ok"` and the instance and network counts.
+Then open the Space itself and walk the demo:
+
+1. The map draws a city with roads coloured by congestion.
+2. Moving the time-of-day slider recolours them.
+3. **Generate instance** places a depot and stops on real intersections.
+4. **Optimise** returns routes in about ten seconds, with the search visible
+   while it runs.
+5. The **Benchmark** tab shows the 1,520-run results.
 
 ---
 
-## Settings you may want
+## Settings worth knowing
 
-Set these under **Settings → Variables and secrets** as plain variables.
+Under **Settings → Variables and secrets**, as plain variables:
 
-| Variable | Default in the image | Why change it |
+| Variable | Default | When to change it |
 | --- | --- | --- |
-| `QROUTE_API_PRELOAD` | `all` | `none` starts faster and uses ~313 MB instead of ~1.3 GB. Worth setting on a constrained host. |
-| `QROUTE_MAX_ACTIVE_RUNS` | `4` | Lower it if several visitors solving at once make the Space sluggish. |
+| `QROUTE_API_PRELOAD` | `all` | `first` starts faster; `none` uses least memory. With 16 GB, `all` is fine. |
+| `QROUTE_MAX_ACTIVE_RUNS` | `4` | Lower if several visitors solving at once feels sluggish. |
 | `QROUTE_MAX_RUN_SECONDS` | `300` | The longest single run a visitor may request. |
-| `QROUTE_LOG_FORMAT` | `text` | `json` if you want to parse the logs. |
+
+## Keeping it awake
+
+A Space sleeps after 48 hours with no visitors and wakes on the next request,
+which takes a minute or so. Before a judging window, open it yourself once to
+make sure it is warm. Under **Settings** you can also disable sleeping.
 
 ## When it does not work
 
-**The build fails while installing.** Check the Logs tab. The usual cause is a
-dependency with no wheel for the platform; every dependency here resolves to a
-manylinux wheel, so this should not happen, but the log names the package.
+**The build fails while installing.** Read the Logs tab; the failing package is
+named. Every dependency here resolves to a wheel on `linux/amd64`, so this
+should not happen.
 
-**The Space builds and then shows a blank page.** The port is wrong. `app_port`
-in `README.md` must equal `QROUTE_PORT` in the image, both 8000 by default.
+**It builds, then the page is blank.** The port is wrong. `app_port` in
+`README.md` must equal `QROUTE_PORT` in the image. Both are 8000.
 
-**The map has no roads.** The road graphs are fetched on first use and need
-outbound network access, which Spaces allows. Check the logs for a message from
-`qroute osm fetch`. The benchmark instances work regardless, so the Solver and
-Benchmark pages are unaffected.
+**"Space is running" but the map has no roads.** Step 5 was skipped, so the
+graphs are not in the image. Either redo it, or run
+`qroute osm fetch` from the Space's terminal, accepting that it is lost on the
+next restart.
 
-**Everything is slow on the first solve.** The compiled kernels are baked in at
-build time, but Numba keys its cache on the CPU it compiled for. If the Space
-runs on a different processor than the builder, the first solve recompiles once
-and every later one is fast. It is a slow first request, never an error.
+**Push rejected for a large file.** Step 7's LFS tracking was missed. Check with
+`git lfs ls-files`.
+
+**The first solve is slower than later ones.** Numba keys its compiled cache to
+the CPU it built on, and the Space may run on a different one. It recompiles
+once. Expected, never an error.

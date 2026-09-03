@@ -205,6 +205,25 @@ USER qroute
 RUN qroute version \
  && qroute solve A-n32-k5 --seconds 1
 
+# Optionally bake the road graphs into the image.
+#
+# By default they are left out: they are 40 MB, they are regenerable from
+# data/osm/networks.json, and on a host with a persistent volume it is better to
+# fetch them once at runtime than to carry them in every image layer.
+#
+# On a platform with an ephemeral filesystem, though, that reasoning inverts.
+# Hugging Face Spaces gives no persistent disk on the standard tiers, so a
+# runtime fetch is repeated on every restart and the first visitor after each
+# one waits several minutes with a map that has no roads on it. Building with
+# `--build-arg BAKE_OSM=1` puts them in the image instead, which costs about
+# 40 MB and three minutes of build time and makes the container start ready.
+ARG BAKE_OSM=0
+RUN if [ "$BAKE_OSM" = "1" ]; then \
+      echo "baking road graphs into the image" && qroute osm fetch; \
+    else \
+      echo "road graphs left out; fetch them at runtime with 'qroute osm fetch'"; \
+    fi
+
 EXPOSE 8000
 
 # /api/health answers as soon as the application has started; it reports the
