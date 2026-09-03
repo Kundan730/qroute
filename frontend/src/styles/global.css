@@ -80,18 +80,30 @@
   --bad: #b5364a;
 
   /* Congestion ramp, matched band for band to
-     qroute.traffic.bpr.CONGESTION_BANDS. Grey through to crimson: no green, no
-     gold, no blue. Free-flowing roads are the quietest thing on the map,
-     because a road behaving normally is not news - but quiet is not invisible:
-     an earlier draft put free flow at #a6adb9, which measured 2.26:1 against
-     the basemap and made the whole network disappear at an uncongested hour.
-     Every band now clears 3:1, and the ordering is carried by rising
-     saturation rather than by lightness alone. */
-  --cong-free: #7c8493;
-  --cong-light: #66708a;
-  --cong-moderate: #7d519b;
-  --cong-heavy: #a33f74;
-  --cong-severe: #b02a3f;
+     qroute.traffic.bpr.CONGESTION_BANDS.
+
+     This is the conventional traffic scale - green, through olive and amber,
+     into orange and red - and it is conventional on purpose. An earlier version
+     avoided green and gold for palette reasons and ran grey through violet to
+     crimson instead. It was monotonic and it cleared every contrast bar, and it
+     still failed the only test that matters here: a reader could not tell at a
+     glance which end meant trouble. On a traffic map the convention carries
+     more meaning than any palette does, so the palette gives way.
+
+     Two constraints are held on top of the convention, because the naive
+     green-yellow-red fails both. Every band clears 3:1 against the pale
+     basemap, which the usual bright yellow does not at around 2.3:1. And
+     luminance falls monotonically from free flow to severe, so severity also
+     reads as "darker": that keeps the order intact in greyscale, in a
+     photocopied report, and for the roughly one man in twelve who cannot
+     separate red from green and would otherwise see the two ends of this scale
+     as the same colour. Holding both is why the middle is olive and amber
+     rather than a bright yellow. */
+  --cong-free: #0F9D4F;
+  --cong-light: #6E8A12;
+  --cong-moderate: #9C6708;
+  --cong-heavy: #A94714;
+  --cong-severe: #A81E19;
 
   --radius: 3px;
   --radius-lg: 5px;
