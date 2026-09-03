@@ -55,7 +55,6 @@ const CHIP: CSSProperties = {
 export default function App() {
   const [page, setPage] = useState<PageId>('map');
   const backend = useAppStore((s) => s.backend);
-  const health = useAppStore((s) => s.health);
   const error = useAppStore((s) => s.error);
   const bootstrap = useAppStore((s) => s.bootstrap);
   const recheck = useAppStore((s) => s.recheck);

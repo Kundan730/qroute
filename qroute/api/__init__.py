@@ -24,11 +24,33 @@ Modules
 :mod:`qroute.api.networks`
     Road-network, traffic-simulator and shortest-path endpoints.
 
+:mod:`qroute.config`
+    Not part of this package, but read by all of it: the typed settings object
+    that decides where the data is, what CORS permits and how long a run may
+    take.
+
 Run it with ``uvicorn qroute.api.app:app`` or ``python -m qroute.api.app``.
+
+Import order
+------------
+Importing anything from this package resolves the settings and publishes the
+resolved absolute data paths into the environment *first*. That has to happen
+before :mod:`qroute.problems.loaders` or :mod:`qroute.graph.osm` are imported,
+because both read ``QROUTE_DATA`` at import time and default it to the relative
+string ``"data"`` - which is why, before this, starting the server from anywhere
+but the repository root produced an API that served an empty catalogue instead
+of an error. Neither module is imported at the top of any module in this
+package, so doing it here is sufficient; see
+:meth:`qroute.config.Settings.export_to_environment` for why the bridge exists
+at all and what should replace it.
 """
 
 from __future__ import annotations
 
-from qroute.api.app import create_app
+from qroute.config import settings
 
-__all__ = ["create_app"]
+settings().export_to_environment()
+
+from qroute.api.app import create_app  # noqa: E402  (must follow the path bridge above)
+
+__all__ = ["create_app", "settings"]

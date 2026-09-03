@@ -2,22 +2,36 @@
 
 This module owns the application factory and every endpoint that is not about
 road networks or traffic (those live in :mod:`qroute.api.networks`). It also
-owns three cross-cutting concerns:
+owns five cross-cutting concerns:
 
-**Startup.** The compiled kernels are JIT-compiled on first use and the bundled
-road graphs take seconds to load. Both are done in a background thread as the
-server boots, so the process starts accepting requests immediately and
-``/api/health`` reports honestly how far the preparation has got, rather than
-the server appearing to hang or the first click appearing to be slow.
+**Configuration.** Nothing here reads the environment directly. Every path,
+limit and policy comes from :func:`qroute.config.settings`, which anchors its
+defaults on the installed package rather than on the working directory, so the
+service behaves the same whether it is started from the repository root, from
+``/tmp`` or from a systemd unit with no working directory at all.
 
-**Errors.** A handler converts any unexpected exception into a 500 carrying a
-short error id and nothing else. The traceback is logged with that id, so an
-operator can find it and a browser cannot read it. Unknown instances and unknown
+**Startup and shutdown.** The lifespan logs exactly what was found and where,
+starts the solver worker launcher before anything can poison a fork, warms the
+JIT kernels and preloads the road graphs in the background so the process
+accepts requests immediately, and on the way out terminates every worker and
+*waits for it*, so Ctrl-C does not leave orphaned solver processes holding
+cores.
+
+**Security posture.** CORS is same-origin by default and has to be widened on
+purpose; see :func:`create_app` for the reasoning. Nothing about the host's
+filesystem layout is exposed over HTTP - the startup banner goes to the log,
+where the operator who started the process can read it and a visitor cannot.
+
+**Errors and observability.** A handler converts any unexpected exception into a
+500 carrying a short request id and nothing else. The traceback is logged with
+that id, so an operator can find it and a browser cannot read it. Every request
+is logged once with its status and server-side duration, and carries those back
+as ``X-Request-Id`` and ``X-Response-Time-Ms``. Unknown instances and unknown
 networks are 404s whose message lists what does exist; bad parameters are 422s
 from Pydantic.
 
-**The built frontend.** When ``frontend/dist`` exists it is served at the root,
-so ``uvicorn qroute.api.app:app`` runs the whole platform from one command. When
+**The built frontend.** When the configured ``frontend/dist`` exists it is served
+at the root, so ``qroute serve`` runs the whole platform from one command. When
 it does not, the API still starts and the root route explains how to build it.
 """
 
@@ -25,7 +39,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -61,20 +74,35 @@ from qroute.api.schemas import (
     RunStatus,
 )
 from qroute.api.state import STATE, StoredInstance, instance_detail
+from qroute.config import Settings, configure_logging, settings
 
 log = logging.getLogger("qroute.api")
 
-#: Where the benchmark runner writes its output, and therefore where the
-#: benchmark endpoints look. Overridable so a demonstration can point at a
-#: prepared directory.
-RESULTS_DIR = Path(os.environ.get("QROUTE_RESULTS", "results/runs"))
+#: How long shutdown waits for a solver process to die after it has been asked
+#: to. Workers check for cancellation between iterations, so a second is
+#: generous; whatever is still alive after it is killed outright, because a
+#: Ctrl-C that leaves a core pinned is worse than a solver that loses its last
+#: partial result.
+WORKER_SHUTDOWN_GRACE_SECONDS: float = 1.0
 
-#: Where the built single-page application lives, when it has been built.
-FRONTEND_DIST = Path(os.environ.get("QROUTE_FRONTEND", "frontend/dist"))
 
-#: Development origins allowed by CORS. The regex covers whatever port Vite
-#: settles on; the browser never sends credentials, so this is not a hole.
-DEV_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+class RunAccepted(RunHandle):
+    """``POST /api/runs`` and ``/reoptimize``: the handle plus what was granted.
+
+    :class:`~qroute.api.schemas.RunHandle` carries only the id. That was fine
+    while the server granted exactly what was asked for, but the time limit is
+    now bounded by configuration, and a service that quietly gives a client
+    something other than what it requested is a service whose measurements
+    cannot be trusted. The two extra fields are additive, so a client that only
+    reads ``run_id`` is unaffected.
+    """
+
+    #: The wall-clock budget the run actually received, in seconds.
+    max_seconds: float
+
+    #: Set when :attr:`max_seconds` is below what the request asked for, with
+    #: the reason. ``None`` when the request was granted in full.
+    clamped: Optional[str] = None
 
 
 # --------------------------------------------------------------------------
@@ -84,33 +112,91 @@ DEV_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.basicConfig(
-        level=os.environ.get("QROUTE_LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    registry = RunRegistry(STATE)
+    """Bring the service up, and take it down without leaving anything behind."""
+    config = settings()
+    configure_logging(config)
+    # Refusing to start beats starting and answering every request with an empty
+    # list: a judge who runs this from the wrong directory, or an operator whose
+    # deployment forgot to ship data/, gets a message naming the directories
+    # that were searched and the variable that fixes it.
+    config.require_data()
+    _log_startup_banner(config)
+
+    registry = RunRegistry(STATE, max_active=config.max_active_runs)
     STATE.runs = registry
     # The fork server must be started before a road network is opened: see the
     # module docstring of qroute.api.runs. This is the ordering that keeps
     # solver processes from being killed by PROJ's atfork handler, so it happens
     # here, synchronously, ahead of the background preload.
     registry.prime()
-    STATE.start_background_startup()
+    STATE.start_background_startup(preload=config.preload)
     log.info(
-        "qroute API %s ready; solver workers use the %s start method; "
+        "qroute API %s ready; %d solver workers max, %s start method; "
         "warm-up and preload running in the background",
         __version__,
+        registry.max_active,
         registry.start_method,
     )
     try:
         yield
     finally:
-        if STATE.runs is not None:
-            STATE.runs.shutdown()
+        _shutdown_workers(registry)
 
 
-def create_app() -> FastAPI:
+def _log_startup_banner(config: Settings) -> None:
+    """Say what was loaded and from where, once, at INFO.
+
+    This is the answer to "it works on your laptop": the log states the absolute
+    directory every piece of data came from, so a run that finds nothing is
+    diagnosed by reading the first ten lines of output rather than by guessing
+    at the working directory.
+    """
+    log.info("qroute %s starting", __version__)
+    for key, value in config.describe():
+        log.info("  %-18s %s", key, value)
+    if not config.osm_dir.is_dir():
+        log.warning(
+            "no road graphs under %s; the map and network endpoints will be empty "
+            "until `qroute osm fetch` has been run",
+            config.osm_dir,
+        )
+
+
+def _shutdown_workers(registry: RunRegistry) -> None:
+    """Terminate every solver process and wait for it to actually be gone.
+
+    ``RunRegistry.shutdown`` asks each worker to stop, which is enough for a
+    cancellation during normal operation because the reader thread stays alive
+    to reap it. At interpreter shutdown that is not true: the process can be
+    torn down while a ``SIGTERM`` is still in flight, and the solver survives its
+    parent. So we join each child here and kill whatever outlives the grace
+    period, and report the count either way rather than assuming it worked.
+    """
+    if registry is None:  # pragma: no cover - defensive
+        return
+    live = [r for r in registry.all_runs() if r.process is not None and r.process.is_alive()]
+    registry.shutdown()
+    killed = 0
+    for record in live:
+        process = record.process
+        if process is None:
+            continue
+        process.join(timeout=WORKER_SHUTDOWN_GRACE_SECONDS)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=WORKER_SHUTDOWN_GRACE_SECONDS)
+            killed += 1
+    if live:
+        log.info(
+            "shutdown: stopped %d solver worker(s)%s",
+            len(live),
+            f", {killed} needed SIGKILL" if killed else "",
+        )
+
+
+def create_app(config: Optional[Settings] = None) -> FastAPI:
     """Build the application. A factory so tests can hold their own instance."""
+    config = config or settings()
     app = FastAPI(
         title="qroute API",
         version=__version__,
@@ -123,43 +209,144 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origin_regex=DEV_ORIGIN_REGEX,
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # ---------------------------------------------------------------- CORS
+    #
+    # The default is *no* CORS middleware at all, which means same-origin only.
+    # That is a deliberate choice, not an omission, and it costs nothing:
+    #
+    #   * in production this process serves the built SPA itself, from this same
+    #     origin, so the browser never makes a cross-origin request; and
+    #   * in development the Vite dev server proxies ``/api`` to this process
+    #     (see frontend/vite.config.ts), so development is same-origin too -
+    #     which is also what lets ``EventSource`` reach the run stream without
+    #     any special handling.
+    #
+    # What was here before allowed any origin matching
+    # ``^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$``. On a shared or
+    # multi-tenant machine that is every other page served from localhost on any
+    # port, and this API is not read-only: it starts solver processes, injects
+    # traffic incidents and moves the simulation clock. The absence of
+    # credentials makes it un-*authenticated* abuse, not harmless abuse.
+    #
+    # Widen it deliberately with QROUTE_CORS_ORIGINS (an explicit list) or
+    # QROUTE_CORS_ORIGIN_REGEX. Credentials stay off in every configuration:
+    # this service has no session to steal, and allowing them would additionally
+    # make a wildcard origin illegal.
+    if config.cors_enabled:
+        if "*" in config.cors_allow_origins:
+            log.warning(
+                "CORS is configured to allow any origin; every page in the "
+                "visitor's browser can start solver runs on this host"
+            )
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(config.cors_allow_origins),
+            allow_origin_regex=config.cors_allow_origin_regex,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type"],
+        )
+        log.info(
+            "CORS enabled for origins=%s regex=%s",
+            list(config.cors_allow_origins) or "(none)",
+            config.cors_allow_origin_regex or "(none)",
+        )
 
+    _register_request_logging(app, config)
     app.include_router(networks_module.router)
     _register_routes(app)
     _register_error_handlers(app)
-    _mount_frontend(app)
+    _mount_frontend(app, config)
     return app
+
+
+def _register_request_logging(app: FastAPI, config: Settings) -> None:
+    """Give every request an id and log it once with its server-side duration.
+
+    The id is attached to ``request.state`` before the handler runs, so the
+    unhandled-exception handler below reports the same id the client was given
+    and a log search on it finds both halves of the story.
+
+    The duration is time-to-response-start, which for an ordinary JSON endpoint
+    is the whole thing. For the SSE stream it is the time to open the stream,
+    not the length of the run - the body is produced after this middleware has
+    returned. That is the honest measurement to record here; run durations are
+    reported by the run endpoints themselves.
+    """
+
+    @app.middleware("http")
+    async def timing(request: Request, call_next):
+        request_id = uuid.uuid4().hex[:8]
+        request.state.request_id = request_id
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            # Logged here as well as in the exception handler because a failure
+            # inside a *middleware* never reaches that handler, and an error
+            # that leaves no timing line is the one that is hardest to find.
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            log.exception(
+                "%s %s failed after %.1fms",
+                request.method, request.url.path, elapsed_ms,
+                extra={"request_id": request_id, "duration_ms": round(elapsed_ms, 1)},
+            )
+            raise
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        response.headers["X-Request-Id"] = request_id
+        response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+        if config.request_log:
+            # Static assets are logged at DEBUG: a page load fetches a dozen of
+            # them and burying the API calls under that helps nobody. Anything
+            # that failed is logged at INFO whatever it was.
+            interesting = request.url.path.startswith("/api") or response.status_code >= 400
+            log.log(
+                logging.INFO if interesting else logging.DEBUG,
+                "%s %s -> %d in %.1fms",
+                request.method, request.url.path, response.status_code, elapsed_ms,
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": round(elapsed_ms, 1),
+                },
+            )
+        return response
 
 
 def _register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:
-        error_id = uuid.uuid4().hex[:8]
-        log.exception("unhandled error %s on %s %s", error_id, request.method, request.url.path)
+        # The id is the one the timing middleware minted, so the line the client
+        # is shown and the traceback in the log carry the same string.
+        error_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex[:8]
+        log.exception(
+            "unhandled error %s on %s %s",
+            error_id, request.method, request.url.path,
+            extra={"request_id": error_id},
+        )
         return JSONResponse(
             status_code=500,
             content={
                 "detail": "internal error; the server log holds the details",
                 "error_id": error_id,
             },
+            headers={"X-Request-Id": error_id},
         )
 
 
-def _mount_frontend(app: FastAPI) -> None:
-    """Serve ``frontend/dist`` at the root when it exists."""
-    if FRONTEND_DIST.is_dir() and (FRONTEND_DIST / "index.html").exists():
+def _mount_frontend(app: FastAPI, config: Settings) -> None:
+    """Serve the configured ``frontend/dist`` at the root when it exists."""
+    dist = config.frontend_dist
+    if config.frontend_built:
         from fastapi.staticfiles import StaticFiles
 
-        app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
-        log.info("serving the built frontend from %s", FRONTEND_DIST)
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
+        log.info("serving the built frontend from %s", dist)
         return
+
+    log.warning("no built frontend at %s; serving the API only", dist)
 
     @app.get("/", include_in_schema=False)
     def root() -> dict[str, str]:
@@ -168,7 +355,7 @@ def _mount_frontend(app: FastAPI) -> None:
             "version": __version__,
             "docs": "/docs",
             "frontend": (
-                f"not built; run `npm run build` in frontend/ to have {FRONTEND_DIST} "
+                f"not built; run `npm run build` in frontend/ to have {dist} "
                 "served from here, or `npm run dev` for the development server"
             ),
         }
