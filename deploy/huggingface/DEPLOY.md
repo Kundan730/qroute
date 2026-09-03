@@ -48,7 +48,36 @@ which accepts most debit as well as credit cards.
 
 Public matters: a private Space cannot be opened by a judge without an account.
 
-## 3. Clone the Space
+## 3. Choose how the code gets there
+
+Two ways, and the first is much less work once it is set up.
+
+### Automatically, from GitHub (recommended)
+
+Hugging Face has no "connect your repository" button the way Vercel and Render
+do, because a Space *is* a git repository: deploying means pushing to it. The
+workflow at `.github/workflows/deploy-space.yml` does that push for you, so a
+commit to `main` on GitHub rebuilds the Space. It also handles the two
+substitutions the Space needs, which is why it exists rather than you keeping a
+second remote and remembering to edit two files each time.
+
+Set it up once:
+
+1. Create a Hugging Face token with **write** permission at
+   <https://huggingface.co/settings/tokens>.
+2. On GitHub, go to **Settings → Secrets and variables → Actions → New
+   repository secret**, name it `HF_TOKEN`, and paste the token.
+3. Check the `HF_USERNAME` and `HF_SPACE` values at the top of the workflow
+   match your Space.
+
+Then either push a commit, or run it by hand from the **Actions** tab with
+**Run workflow**. Skip to step 8; steps 4 to 7 are what the workflow automates.
+
+### By hand
+
+Fine for a one-off, and the rest of this section walks it.
+
+## 3a. Clone the Space
 
 ```bash
 git clone https://huggingface.co/spaces/YOUR_USERNAME/qroute hf-qroute
@@ -59,7 +88,7 @@ When it asks for a password, give an access token from
 <https://huggingface.co/settings/tokens> with **write** permission. Your account
 password will not work.
 
-## 4. Copy the project across
+## 4. Copy the project across (manual route)
 
 From the directory that holds this repository:
 
@@ -72,7 +101,7 @@ rsync -a --exclude='.git' --exclude='.venv' --exclude='node_modules' \
 
 Everything excluded is either rebuilt during the image build or fetched by it.
 
-## 5. Bake the road graphs into the image
+## 5. Bake the road graphs into the image (manual route)
 
 This step is specific to Spaces and matters. Spaces gives no persistent disk on
 the standard tiers, so anything fetched at runtime is lost on every restart, and
@@ -90,7 +119,7 @@ grep -n 'ARG BAKE_OSM' Dockerfile      # confirm it now reads 1
 It adds about 40 MB to the image and three minutes to the build, and the
 container then starts ready to draw a city.
 
-## 6. Add the Space's README
+## 6. Add the Space's README (manual route)
 
 Hugging Face reads its configuration from YAML at the top of `README.md`:
 
@@ -102,7 +131,7 @@ The two lines that matter are `sdk: docker` and `app_port: 8000`. The port must
 match what the container listens on, which the Dockerfile sets through
 `QROUTE_PORT`.
 
-## 7. Push
+## 7. Push (manual route)
 
 The benchmark log is over Hugging Face's 10 MB inline limit, so track it in LFS
 first:
