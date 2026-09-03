@@ -201,11 +201,21 @@ _SEED_ALIASES = ("seed", "random_seed")
 def _call_with_supported(fn, inst, **kwargs):
     """Call ``fn``, translating budget and seed names and dropping what it cannot take.
 
-    A wrapper that merely forwards ``**kwargs`` is transparent to introspection,
-    so the real signature has to be found by following the forwarding chain. When
-    that is not possible the call is attempted and any complaint about an
-    unexpected keyword is used to drop that keyword and retry, which converges
-    because each retry removes one argument.
+    This has one job that is easy to get subtly and catastrophically wrong. The
+    external wrappers are declared ``(instance, **kwargs)`` and forward to an
+    inner function that holds the real signature. An earlier version of this
+    routine inspected only the wrapper, found that neither ``seconds`` nor
+    ``seed`` appeared among its parameter *names*, and therefore forwarded
+    neither - so every external solver silently ran at its own default budget
+    with its own default seed. The benchmark's central fairness claim, that
+    every solver received the same wall clock, was false for three solvers and
+    nobody noticed, because dropping a keyword raises nothing.
+
+    The rule now is the opposite way round: when a target accepts ``**kwargs``,
+    pass everything and let it complain, rather than filtering against a
+    signature that does not describe what it really accepts. Anything it rejects
+    is removed one keyword at a time, and a rejected budget is retried under
+    each of its other spellings before being given up.
     """
     import inspect
 
@@ -229,35 +239,59 @@ def _call_with_supported(fn, inst, **kwargs):
         names, var_kw = parameters_of(target)
 
     call = dict(kwargs)
-    if names is not None:
-        # Translate the budget to whichever name this solver uses.
-        budget = next((call.pop(a) for a in _BUDGET_ALIASES if a in call), None)
+    budget = next((call.pop(a) for a in _BUDGET_ALIASES if a in call), None)
+    seed = next((call.pop(a) for a in _SEED_ALIASES if a in call), None)
+
+    if names is not None and not var_kw:
+        # The signature is trustworthy: name the budget and seed the way this
+        # target spells them, and drop anything it does not declare.
         if budget is not None:
             for alias in _BUDGET_ALIASES:
                 if alias in names:
                     call[alias] = budget
                     break
-        seed = next((call.pop(a) for a in _SEED_ALIASES if a in call), None)
         if seed is not None:
             for alias in _SEED_ALIASES:
                 if alias in names:
                     call[alias] = seed
                     break
-        if not var_kw:
-            call = {k: v for k, v in call.items() if k in names}
+        call = {k: v for k, v in call.items() if k in names}
+        return fn(inst, **call)
 
-    for _attempt in range(len(call) + 1):
-        try:
-            return fn(inst, **call)
-        except TypeError as exc:
-            message = str(exc)
-            if "unexpected keyword argument" not in message:
-                raise
-            bad = message.rsplit("'", 2)
-            key = bad[-2] if len(bad) >= 2 else None
-            if key is None or key not in call:
-                raise
-            call.pop(key)
+    # The target hides its real signature behind **kwargs. Try each spelling of
+    # the budget and the seed in turn, keeping whatever is accepted.
+    budget_spellings = [a for a in _BUDGET_ALIASES] if budget is not None else [None]
+    seed_spellings = [a for a in _SEED_ALIASES] if seed is not None else [None]
+    last_error: Exception | None = None
+    for b_alias in budget_spellings:
+        for s_alias in seed_spellings:
+            attempt = dict(call)
+            if b_alias is not None:
+                attempt[b_alias] = budget
+            if s_alias is not None:
+                attempt[s_alias] = seed
+            for _ in range(len(attempt) + 1):
+                try:
+                    return fn(inst, **attempt)
+                except TypeError as exc:
+                    message = str(exc)
+                    if "unexpected keyword argument" not in message:
+                        raise
+                    bad = message.rsplit("'", 2)
+                    key = bad[-2] if len(bad) >= 2 else None
+                    if key is None or key not in attempt:
+                        last_error = exc
+                        break
+                    if key in (b_alias, s_alias):
+                        # This spelling is wrong; try the next one rather than
+                        # silently continuing without a budget or a seed.
+                        last_error = exc
+                        break
+                    attempt.pop(key)
+            else:
+                continue
+    if last_error is not None:
+        raise last_error
     return fn(inst)
 
 

@@ -60,7 +60,11 @@ def _warm_up(instance):
 
 # --------------------------------------------------------------------- registry
 def test_registry_lists_every_algorithm():
-    assert set(names()) == {"qpso", "pso", "ga", "sa", "aco"}
+    # Every solver a user can name must resolve. The two quantum rotation-gate
+    # engines are included: they appear in the published results table, so
+    # leaving them out of the registry would make the headline second-placed
+    # method unreachable from the command line, the API and the interface.
+    assert set(names()) == {"qpso", "qiea", "qrk", "pso", "ga", "sa", "aco"}
     assert {c["name"] for c in catalogue()} == set(names())
     assert all(c["description"] for c in catalogue())
 

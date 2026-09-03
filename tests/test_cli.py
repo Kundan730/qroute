@@ -355,22 +355,64 @@ def test_report_rejects_a_directory_without_results(tmp_path: Path):
     assert invoke("report", str(tmp_path)).exit_code == 1
 
 
-def _row(instance: str, algorithm: str, cost: float, gap: float | None) -> dict:
+def _row(instance: str, algorithm: str, cost: float, gap: float | None,
+         status: str = "ok") -> dict:
     return {"instance": instance, "algorithm": algorithm, "seed": 1, "cost": cost,
             "gap": gap, "bks": 1000.0, "n_routes": 10, "feasible": True,
             "violation": 0.0, "iterations": 10, "evaluations": 100,
-            "seconds": 3.0, "status": "ok"}
+            "seconds": 3.0, "status": status}
 
 
-def test_summarise_survives_a_run_that_found_no_solution():
-    """A run that returns an infinite cost must not destroy a finished sweep.
+def _rendered_without_raising(summary: dict) -> str:
+    """Every reporting surface must survive the summary it is handed."""
+    render_to_text(render.summary_table(summary))
+    render_to_text(render.cell_table(summary))
+    return render.markdown_report(summary)
+
+
+def test_summarise_reports_a_run_that_found_no_solution_separately():
+    """A solver that returns nothing must be counted, not averaged in.
 
     This is not hypothetical: OR-Tools on a three-second budget finds no
-    feasible solution at all for R101, RC101 and RC105, its cost comes back as
-    infinity, and the gap block for that cell collapses to ``{"n": 0}``.
-    ``BenchmarkRunner.summarise`` then raises ``KeyError: 'median'`` while
-    building the omnibus test, after every run has already been paid for. The
-    CLI falls back to a reduced summary instead of losing the sweep.
+    feasible solution at all for R101, RC101 and RC105. ``_run_one`` writes
+    those runs down with ``status: no_solution`` rather than as a feasible row
+    with an infinite cost, and :meth:`BenchmarkRunner.summarise` keeps them out
+    of the cells while reporting how many there were and which they were. The
+    sweep survives, and nothing is hidden.
+    """
+    from qroute.benchmark.runner import BenchmarkRunner
+
+    rows = [_row(inst, algo, 1040.0, 4.0)
+            for inst in ("R101", "R104", "R107")
+            for algo in ("qpso", "ga", "ortools")]
+    rows[2] = {"instance": "R101", "algorithm": "ortools", "seed": 1,
+               "status": "no_solution", "seconds": 3.0, "iterations": 0,
+               "evaluations": 0, "error": "returned no complete solution within 3s"}
+
+    summary = BenchmarkRunner.summarise(rows)
+
+    assert summary["n_ok"] == 8
+    assert summary["n_no_solution"] == 1
+    assert summary["n_failed"] == 0
+    assert summary["no_solution"][0]["instance"] == "R101"
+    assert summary["no_solution"][0]["algorithm"] == "ortools"
+    # The empty run leaves no cell, so it cannot enter any average, and the
+    # omnibus test drops R101 rather than comparing different sets of runs.
+    assert "R101|ortools" not in summary["cells"]
+    assert summary["cells"]["R101|qpso"]["gap"]["median"] == pytest.approx(4.0)
+    assert summary["omnibus"] is None      # only two instances scored by all three
+    assert "R101" in _rendered_without_raising(summary)
+
+
+def test_summarise_survives_a_row_whose_cost_is_infinite():
+    """A hand-written or historical row with an infinite cost must not crash.
+
+    Rows written before ``no_solution`` existed - and any rows.jsonl a reader
+    edits - can still carry ``status: ok`` with an infinite cost. Its gap
+    summary then collapses to ``{"n": 0}``, a dictionary that is truthy but has
+    no ``median``. Every consumer must treat that as "not scored" rather than
+    index into it, or a finished sweep is lost at the reporting step, after all
+    the compute has been paid for.
     """
     from qroute.benchmark.runner import BenchmarkRunner
     from qroute.cli.main import _summarise
@@ -380,19 +422,13 @@ def test_summarise_survives_a_run_that_found_no_solution():
             for algo in ("qpso", "ga", "ortools")]
     rows[2] = _row("R101", "ortools", float("inf"), float("inf"))
 
-    with pytest.raises(KeyError):
-        BenchmarkRunner.summarise(rows)
-
-    summary = _summarise(rows)
-    assert summary["degraded"] is True
-    assert summary["cells"]["R101|ortools"]["gap"] is None
-    assert summary["cells"]["R101|qpso"]["gap"]["median"] == pytest.approx(4.0)
+    summary = BenchmarkRunner.summarise(rows)
+    assert summary["cells"]["R101|ortools"]["gap"] == {"n": 0}
     assert summary["omnibus"] is None
-    assert summary["n_ok"] == 9
-    # And the reduced summary must still render without raising.
-    render.summary_table(summary)
-    render.cell_table(summary)
-    assert "R101" in render.markdown_report(summary)
+    assert "R101" in _rendered_without_raising(summary)
+
+    # The CLI's tolerant wrapper agrees with the runner rather than replacing it.
+    assert _summarise(rows) == summary
 
 
 # ---------------------------------------------------------------------------

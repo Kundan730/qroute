@@ -276,6 +276,7 @@ class Instance:
         return SolutionStats(
             distance=dist,
             duration=dur,
+            congestion_delay=cong,
             capacity_violation=cap_v,
             time_window_violation=tw_v,
             duration_violation=dur_v,
@@ -284,11 +285,19 @@ class Instance:
         )
 
     def objective(self, stats: SolutionStats, n_routes: int = 0) -> float:
-        """Weighted objective value (excluding constraint penalties)."""
+        """Weighted objective value (excluding constraint penalties).
+
+        This must agree with :attr:`cost_matrix`, which is what the search
+        actually minimises. It previously did not: the congestion term was
+        folded into the matrix but written here as ``+ w.congestion * 0.0``, so
+        with a non-zero congestion weight a solution's reported cost was lower
+        than the cost the optimiser had minimised. The discrepancy was hidden
+        only because every construction site pinned the weight to zero.
+        """
         w = self.weights
         val = w.distance * stats.distance + w.time * stats.duration
         if w.congestion:
-            val += w.congestion * 0.0  # congestion already folded into cost_matrix
+            val += w.congestion * stats.congestion_delay
         val += w.vehicles * n_routes
         return val
 

@@ -23,10 +23,18 @@ class SolutionStats:
 
     distance: float = 0.0
     duration: float = 0.0
+    #: Vehicle-seconds spent in congestion: the congestion level of each arc
+    #: weighted by the time spent on it. Zero unless the instance carries a
+    #: congestion matrix, which only road-network instances do.
+    congestion_delay: float = 0.0
     capacity_violation: float = 0.0
     time_window_violation: float = 0.0
     duration_violation: float = 0.0
     fleet_violation: int = 0
+    #: Reserved for the edge-capacity extension of the flow constraints, which
+    #: is formulated in the documentation but NOT implemented: nothing computes
+    #: this and it is always zero. It is kept as a named field so the gap is
+    #: visible rather than silently absent.
     edge_load_violation: float = 0.0
 
     @property
@@ -47,6 +55,7 @@ class SolutionStats:
         return {
             "distance": self.distance,
             "duration": self.duration,
+            "congestion_delay": self.congestion_delay,
             "capacity_violation": self.capacity_violation,
             "time_window_violation": self.time_window_violation,
             "duration_violation": self.duration_violation,

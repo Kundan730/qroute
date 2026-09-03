@@ -654,7 +654,11 @@ def markdown_report(summary: Mapping[str, Any], meta: Optional[Mapping[str, Any]
         row = [inst]
         for algo in algorithms:
             block = (cells.get(f"{inst}|{algo}") or {}).get("gap")
-            row.append(f"{block['median']:.2f}" if block else "-")
+            # An unscored cell's gap summary is {"n": 0}: truthy, but with no
+            # median. Testing the dictionary alone indexed into it and lost the
+            # whole report to a KeyError, so ask for the value itself.
+            median = block.get("median") if block else None
+            row.append(f"{median:.2f}" if median is not None else "-")
         out.append(_md_row(row))
     out.append("")
 

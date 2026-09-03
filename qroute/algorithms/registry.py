@@ -25,6 +25,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
 #: the strings accepted on the command line and in API requests.
 ALGORITHMS: dict[str, str] = {
     "qpso": "qroute.algorithms.qpso:QPSO",
+    "qiea": "qroute.algorithms.qiea:QIEA",
+    "qrk": "qroute.algorithms.qiea:QuantumRotationKeys",
     "pso": "qroute.algorithms.pso:PSO",
     "ga": "qroute.algorithms.ga:GeneticAlgorithm",
     "sa": "qroute.algorithms.sa:SimulatedAnnealing",
@@ -35,6 +37,8 @@ ALGORITHMS: dict[str, str] = {
 #: capability endpoint. Kept here so listing algorithms needs no imports.
 DESCRIPTIONS: dict[str, str] = {
     "qpso": "Quantum-behaved particle swarm (the proposed method)",
+    "qiea": "Quantum-inspired evolutionary search with Han-Kim rotation gates",
+    "qrk": "Rotation-gate register read as random keys",
     "pso": "Classical particle swarm with constriction coefficients",
     "ga": "Steady-state genetic algorithm with order crossover",
     "sa": "Simulated annealing over route-level neighbourhoods",
