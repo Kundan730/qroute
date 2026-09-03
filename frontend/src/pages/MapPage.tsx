@@ -16,6 +16,7 @@ import { BASEMAPS, DEFAULT_BASEMAP, getBasemap, type BasemapId } from '../compon
 import 'leaflet/dist/leaflet.css';
 import type { EventKind } from '../api/types';
 import { Legend } from '../components/map/Legend';
+import { RunOverlay } from '../components/map/RunOverlay';
 import { boundsOf, buildRouteLines } from '../components/map/geometry';
 import type { LatLng } from '../components/map/geometry';
 import {
@@ -365,9 +366,17 @@ export function MapPage() {
 
       {/* ------------------------------------------------------------ map */}
       <div
-        className={basemap.bodyClass}
+        className={`${basemap.bodyClass}${run.streaming || run.starting ? ' solving' : ''}`}
         style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}
       >
+        <RunOverlay
+          streaming={run.streaming}
+          starting={run.starting}
+          ticks={run.ticks}
+          budgetSeconds={seconds}
+          algorithm={chosenAlgorithm}
+          onCancel={() => void run.cancel()}
+        />
         {/* Sits over the map rather than in a rail: it changes what you are
             looking at, so it belongs on the thing it changes. */}
         <div
