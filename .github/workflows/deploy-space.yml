@@ -1,29 +1,34 @@
 # Mirror this repository into a Hugging Face Space on every push to main.
 #
 # Hugging Face has no "connect your GitHub repo" integration the way Vercel or
-# Render do. A Space *is* a git repository, so deployment means pushing to it,
-# and this workflow does that push for you. The effect is the same: commit here,
-# and the Space rebuilds.
+# Render do. A Space *is* a git repository, so deploying means pushing to it,
+# and this workflow does that push. Commit here, and the Space rebuilds.
 #
-# Two things have to change on the way across, which is the whole reason this is
-# a workflow rather than a second git remote you push by hand:
+# What it changes on the way across, and why each is necessary:
 #
-#   1. Hugging Face reads a Space's configuration from YAML at the top of
-#      README.md. This project's README is written for people, so the Space's
-#      own version is substituted during the push.
-#   2. Spaces has no persistent disk on the standard tiers, so road graphs
-#      fetched at runtime are lost on every restart. The BAKE_OSM build argument
-#      is switched on so they end up inside the image instead.
+#   1. README.md is replaced. Hugging Face reads a Space's configuration from
+#      YAML at the top of that file; this project's README is written for people.
+#   2. The container port becomes 7860, which is what a Docker Space expects.
+#   3. BAKE_OSM is switched on. Spaces has no persistent disk on the standard
+#      tiers, so road graphs fetched at runtime are lost on every restart and the
+#      next visitor sees a map with no roads.
+#   4. Everything under results/ except the three files the API actually reads is
+#      dropped, and the one remaining binary is tracked with LFS. Hugging Face
+#      rejects a push containing plain binary files, and 15 MB of chart images
+#      that the front end never loads is not worth solving that problem for -
+#      the charts are drawn in the browser from the API's own data.
+#   5. The Space gets a single orphan commit rather than this repository's
+#      history. A Space is a deployment artefact, not an archive, and pushing
+#      45 commits of history means Hugging Face scanning every blob in it.
 #
 # SETUP, once:
-#   1. Create a Hugging Face access token with WRITE permission at
+#   1. Create a Hugging Face token with WRITE permission:
 #      https://huggingface.co/settings/tokens
-#   2. Add it to this repository under Settings -> Secrets and variables ->
-#      Actions -> New repository secret, named HF_TOKEN.
-#   3. Set the two variables below to your Space.
+#   2. Add it here under Settings -> Secrets and variables -> Actions ->
+#      New repository secret, named HF_TOKEN.
+#   3. Check HF_USERNAME and HF_SPACE below.
 #
-# The Space must already exist; this workflow pushes to it, it does not create
-# it. See deploy/huggingface/DEPLOY.md.
+# The Space must already exist; this pushes to it, it does not create it.
 
 name: Deploy to Hugging Face Space
 
@@ -33,10 +38,9 @@ on:
   workflow_dispatch:
 
 env:
-  # Note: the Hugging Face account is Kundan30, which is NOT the same as the
-  # GitHub account (Kundan730). They are different services and the usernames
-  # differ by a digit, which is exactly the sort of thing that produces a 404
-  # from a push and half an hour of confusion.
+  # The Hugging Face account, which is NOT the GitHub one: they differ by a
+  # digit and a wrong value here fails with a 404 against a Space that does
+  # not exist.
   HF_USERNAME: Kundan30
   HF_SPACE: qroute
 
@@ -44,54 +48,73 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out, with full history and LFS objects
-        uses: actions/checkout@v4
-        with:
-          # A Space push needs real history, and the benchmark log is an LFS
-          # object: a shallow checkout would push a pointer file the Space
-          # cannot resolve.
-          fetch-depth: 0
-          lfs: true
+      - uses: actions/checkout@v4
 
       - name: Fail early if the token is missing
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           if [ -z "$HF_TOKEN" ]; then
-            echo "::error::HF_TOKEN is not set. Add a write-scoped Hugging Face token"
-            echo "::error::under Settings -> Secrets and variables -> Actions."
+            echo "::error::HF_TOKEN is not set. Add a write-scoped Hugging Face"
+            echo "::error::token under Settings > Secrets and variables > Actions."
             exit 1
           fi
 
-      - name: Substitute the Space's README
+      - name: Adapt the tree for Spaces
         run: |
-          # Hugging Face reads sdk and app_port from this file's front matter.
+          set -euo pipefail
+
+          # 1. The Space's own README carries the configuration front matter.
           cp deploy/huggingface/README.md README.md
-          head -12 README.md
 
-      - name: Bake the road graphs into the image
-        run: |
-          # Spaces has no persistent disk, so a runtime fetch is lost on every
-          # restart and the next visitor sees a map with no roads.
+          # 2. A Docker Space is expected on 7860.
+          sed -i 's/^ENV QROUTE_PORT=8000$/ENV QROUTE_PORT=7860/' Dockerfile
+          sed -i 's/^EXPOSE 8000$/EXPOSE 7860/' Dockerfile
+          sed -i "s#http://127.0.0.1:8000/api/health#http://127.0.0.1:7860/api/health#" Dockerfile
+
+          # 3. Put the road graphs in the image; the disk here is ephemeral.
           sed -i 's/^ARG BAKE_OSM=0$/ARG BAKE_OSM=1/' Dockerfile
-          grep -n '^ARG BAKE_OSM' Dockerfile
 
-      - name: Push to the Space
+          # 4. Keep only what the API reads: rows, summary, meta. The chart
+          #    images and CSVs are build products of the benchmark, and the
+          #    interface draws its own charts from the API.
+          find results/runs -mindepth 1 -maxdepth 1 -type d ! -name main -exec rm -rf {} +
+          rm -rf results/runs/main/figures results/runs/main/report
+          rm -f results/runs/main/*.csv results/runs/main/report.md
+
+          echo "--- Dockerfile settings ---"
+          grep -nE '^(ENV QROUTE_PORT|EXPOSE|ARG BAKE_OSM)' Dockerfile
+          echo "--- results kept ---"
+          ls -la results/runs/main/
+
+      - name: Push a clean tree to the Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Deploy ${GITHUB_SHA::7} from GitHub" || echo "nothing to commit"
+          set -euo pipefail
+          git config user.name "${HF_USERNAME}"
+          git config user.email "${HF_USERNAME}@users.noreply.huggingface.co"
 
-          # Force, because the two histories are independent: the Space is a
-          # mirror of this repository, never a place work is done directly.
-          # Anything committed in the Space's web editor is overwritten, which
-          # is the intended relationship rather than an accident.
+          git lfs install --local
+
+          # An orphan commit: the Space carries the current state, not this
+          # repository's history.
+          git checkout --orphan space-deploy
+          git rm -r --cached . > /dev/null
+
+          # The one binary the application genuinely needs. Tracking it before
+          # it is staged is what makes it a pointer rather than a blob.
+          git lfs track "results/runs/main/rows.jsonl.gz"
+          git add .gitattributes
+          git add -A
+          git commit -q -m "Deploy ${GITHUB_SHA::7} from GitHub"
+
+          echo "--- LFS objects ---"
+          git lfs ls-files || echo "(none)"
+
           git push --force \
             "https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE}" \
-            HEAD:main
+            space-deploy:main
 
       - name: Where to watch it
         run: |
