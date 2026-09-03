@@ -10,6 +10,7 @@
  */
 
 import type { CongestionSummary } from '../../api/types';
+import { useState } from 'react';
 import { BAND_RANGES, CONGESTION_BANDS, vehicleColor } from '../../lib/colors';
 import { fmtInt } from '../../lib/format';
 
@@ -22,6 +23,10 @@ export function Legend({
   vehicles: number;
   straightLine: boolean;
 }) {
+  // The legend is a reference rather than a running readout, and on a laptop
+  // screen it covers a useful corner of the map, so it folds away.
+  const [open, setOpen] = useState(true);
+
   return (
     <div
       style={{
@@ -29,43 +34,81 @@ export function Legend({
         left: 12,
         bottom: 22,
         zIndex: 500,
-        background: 'rgba(20, 25, 32, 0.93)',
+        background: 'rgba(255, 255, 255, 0.94)',
         border: '1px solid var(--border-strong)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '9px 11px',
-        minWidth: 236,
-        maxWidth: 292,
-        backdropFilter: 'blur(3px)',
+        borderRadius: 'var(--radius)',
+        padding: '10px 12px',
+        minWidth: 250,
+        maxWidth: 268,
+        backdropFilter: 'blur(4px)',
+        boxShadow: 'var(--shadow-float)',
       }}
     >
-      <div
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         style={{
-          fontSize: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          width: '100%',
+          appearance: 'none',
+          background: 'none',
+          border: 0,
+          padding: 0,
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: 'var(--display)',
+          fontSize: 9.5,
+          fontWeight: 700,
           textTransform: 'uppercase',
-          letterSpacing: '0.07em',
-          color: 'var(--text-faint)',
-          marginBottom: 6,
+          letterSpacing: '0.13em',
+          color: 'var(--navy-300)',
+          marginBottom: open ? 7 : 0,
         }}
       >
+        <span
+          aria-hidden
+          style={{
+            display: 'inline-block',
+            transform: open ? 'rotate(90deg)' : 'none',
+            transition: 'transform 140ms ease',
+            fontSize: 8,
+            lineHeight: 1,
+          }}
+        >
+          ▶
+        </span>
         Congestion — delay over free flow
-      </div>
+      </button>
+
+      {open && (
+        <>
       {CONGESTION_BANDS.map((band) => (
         <div
           key={band.name}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '1px 0' }}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '14px 58px 1fr auto',
+            alignItems: 'center',
+            gap: 7,
+            padding: '2px 0',
+            whiteSpace: 'nowrap',
+          }}
         >
           <span
             style={{
-              width: 16,
+              width: 14,
               height: 3,
               background: band.color,
               borderRadius: 2,
               flex: '0 0 auto',
             }}
           />
-          <span style={{ fontSize: 11, color: 'var(--text)', width: 62 }}>{band.label}</span>
-          <span style={{ fontSize: 11, color: 'var(--text-faint)', flex: '1 1 auto' }}>
-            {BAND_RANGES[band.name]}
+          <span style={{ fontSize: 11, color: 'var(--text)' }}>{band.label}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>
+            {BAND_RANGES[band.name].replace(/\s*%\s*delay/, '%').replace(/\s+/g, '')}
           </span>
           {congestion && (
             <span
@@ -139,6 +182,8 @@ export function Legend({
         backend's own histogram; the map draws the most important few thousand.
         Line width follows the OSM highway class.
       </div>
+        </>
+      )}
     </div>
   );
 }

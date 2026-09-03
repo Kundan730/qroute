@@ -24,6 +24,43 @@ function useCanvasRenderer(): L.Canvas {
   return useMemo(() => L.canvas({ padding: 0.3 }), []);
 }
 
+// ------------------------------------------------------------------ colour
+
+/**
+ * Read one design token as a literal string.
+ *
+ * Leaflet writes colours into canvas fill/stroke state and into SVG
+ * presentation attributes, neither of which resolves `var(--token)`, so the
+ * map is the one place in the interface that needs the computed value rather
+ * than the reference. Resolving it here — rather than copying a hex into this
+ * file — keeps `global.css` the single source of truth. The palette is fixed
+ * (the product is light-only, with no theme switch), so a resolved value is
+ * cached for the life of the page; an empty result, which is what a call
+ * before the stylesheet has applied returns, is deliberately not cached.
+ */
+const TOKENS = new Map<string, string>();
+
+function token(name: string): string {
+  const cached = TOKENS.get(name);
+  if (cached) return cached;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  if (value) TOKENS.set(name, value);
+  return value;
+}
+
+/**
+ * The casing colour used under everything the map draws over the basemap.
+ *
+ * Three base layers have to be survived at once — a pale vector map, aerial
+ * imagery, and a dark vector map — and no single ink is legible on all three.
+ * A white casing is, because it is lighter than the darkest layer and the
+ * marks it carries are all darker than the lightest one. It is the standard
+ * cartographic halo and it is why a route on satellite imagery still reads.
+ */
+function casing(): string {
+  return token('--panel');
+}
+
 // ------------------------------------------------------------------- roads
 
 export function EdgeLayer({
@@ -56,8 +93,12 @@ export function EdgeLayer({
       const line = L.polyline(points, {
         renderer,
         color: congestionColor(props.congestion),
-        weight: edgeWeight(props.highway, props.congestion >= 0.75),
-        opacity: 0.82,
+        // Half a pixel wider and close to opaque, because these lines have to
+        // hold up over aerial imagery, where a thin translucent stroke on a
+        // photograph of a city simply disappears. There are several thousand
+        // of them, so they cannot each afford a casing the way a route can.
+        weight: edgeWeight(props.highway, props.congestion >= 0.75) + 0.6,
+        opacity: 0.92,
         interactive: true,
         bubblingMouseEvents: false,
       });
@@ -81,12 +122,33 @@ export function EdgeLayer({
     const feature = edges.features.find((f) => f.properties.edge === selectedEdge);
     if (!feature) return undefined;
     const points: LatLng[] = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-    const halo = L.polyline(points, {
-      color: '#f2f6fb',
-      weight: edgeWeight(feature.properties.highway, false) + 4,
-      opacity: 0.75,
-      interactive: false,
-    }).addTo(map);
+    const width = edgeWeight(feature.properties.highway, false) + 0.6;
+    // Three strokes, because one cannot be seen on all three base layers. The
+    // white outer casing is what makes the highlight visible over satellite
+    // imagery and the dark map; the accent ring is what makes it visible over
+    // the pale one; and the segment is then redrawn in its own congestion
+    // colour on top, so selecting an edge never hides the value that the edge
+    // was selected to inspect.
+    const halo = L.layerGroup([
+      L.polyline(points, {
+        color: casing(),
+        weight: width + 8,
+        opacity: 0.9,
+        interactive: false,
+      }),
+      L.polyline(points, {
+        color: token('--accent'),
+        weight: width + 4,
+        opacity: 0.95,
+        interactive: false,
+      }),
+      L.polyline(points, {
+        color: congestionColor(feature.properties.congestion),
+        weight: width,
+        opacity: 1,
+        interactive: false,
+      }),
+    ]).addTo(map);
     return () => {
       halo.remove();
     };
@@ -96,6 +158,34 @@ export function EdgeLayer({
 }
 
 // ------------------------------------------------------------------- stops
+
+/**
+ * The depot, drawn as a diamond rather than as a larger dot.
+ *
+ * Shape is what makes it findable. In a field of a hundred customers a reader
+ * picks out the one mark that is not a circle immediately, without having to
+ * compare two sizes or two hues against each other, and that holds at any
+ * zoom and for any reader. Colour then reinforces it: the accent is the one
+ * saturated hue in the chrome, and the depot is the one place on the map that
+ * earns it.
+ *
+ * It is a div icon rather than a Leaflet vector so the casing can be written
+ * in tokens directly: a white border to lift it off aerial imagery and the
+ * dark basemap, and a navy hairline outside that border, because on the pale
+ * basemap a white casing on a near-white background would otherwise be no
+ * casing at all. There is exactly one of these per instance, so the cost of a
+ * DOM node is irrelevant here in a way it would not be for the customers.
+ */
+const DEPOT_ICON = L.divIcon({
+  className: '',
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  popupAnchor: [0, -11],
+  html:
+    '<span style="display:block;width:12px;height:12px;margin:2px;' +
+    'transform:rotate(45deg);background:var(--accent);' +
+    'border:2px solid var(--panel);box-shadow:0 0 0 1px var(--navy);"></span>',
+});
 
 export function StopsLayer({ instance }: { instance: InstanceDetail | null }) {
   const map = useMap();
@@ -107,14 +197,20 @@ export function StopsLayer({ instance }: { instance: InstanceDetail | null }) {
     instance.coords.forEach((coord, index) => {
       const isDepot = index === 0;
       const demand = instance.demand[index] ?? 0;
-      const marker = L.circleMarker(coord, {
-        renderer: isDepot ? undefined : renderer,
-        radius: isDepot ? 7 : 4,
-        color: isDepot ? '#f2f6fb' : '#0e1116',
-        weight: isDepot ? 2 : 1,
-        fillColor: isDepot ? '#e8894a' : '#93a3b6',
-        fillOpacity: 1,
-      });
+      // Customers are navy dots in a white casing. Navy is dark enough to read
+      // on the pale basemap and on satellite imagery; the casing is what keeps
+      // them from dissolving into the dark one, and what separates two stops
+      // that sit on the same junction.
+      const marker = isDepot
+        ? L.marker(coord, { icon: DEPOT_ICON, keyboard: false })
+        : L.circleMarker(coord, {
+            renderer,
+            radius: 4.5,
+            color: casing(),
+            weight: 1.5,
+            fillColor: token('--navy'),
+            fillOpacity: 1,
+          });
       const window_ = instance.time_windows?.[index];
       marker.bindPopup(
         isDepot
@@ -149,20 +245,23 @@ export function RouteLayer({ lines, dim }: { lines: RouteLine[]; dim: boolean })
     const group = L.layerGroup();
     for (const line of lines) {
       const color = vehicleColor(line.vehicle);
-      // A dark casing under each route keeps it readable where it crosses a
-      // congested arterial of a similar hue.
+      // A white casing under each route does two jobs at once: it separates
+      // the route from a congested arterial of a similar hue underneath it,
+      // and it is what stops the route from being swallowed by aerial imagery
+      // or by the dark basemap. Every vehicle hue is dark, so the casing never
+      // competes with the line it carries.
       group.addLayer(
         L.polyline(line.points, {
-          color: '#0b0e12',
-          weight: 6.5,
-          opacity: dim ? 0.35 : 0.65,
+          color: casing(),
+          weight: 7,
+          opacity: dim ? 0.4 : 0.9,
           interactive: false,
         }),
       );
       const path = L.polyline(line.points, {
         color,
-        weight: 3,
-        opacity: dim ? 0.5 : 0.95,
+        weight: 3.4,
+        opacity: dim ? 0.55 : 1,
         dashArray: line.onRoad ? undefined : '6 5',
       });
       path.bindTooltip(
@@ -202,8 +301,8 @@ export function VehicleLayer({ lines, running }: { lines: RouteLine[]; running: 
     if (!running || lines.length === 0) return undefined;
     const markers = lines.map((line) =>
       L.circleMarker(pointAt(line, 0), {
-        radius: 5.5,
-        color: '#0b0e12',
+        radius: 6,
+        color: casing(),
         weight: 2,
         fillColor: vehicleColor(line.vehicle),
         fillOpacity: 1,
@@ -298,12 +397,17 @@ export function ResizeWatcher() {
 // ------------------------------------------------------------- exact path
 
 /**
- * The exact shortest path between two stops, drawn as a bright thin line over
- * everything else.
+ * The exact shortest path between two stops, drawn over everything else as a
+ * navy ribbon with a white dashed core.
  *
  * It is deliberately visually distinct from the vehicle routes: this is the
  * output of A* on the road graph, an exactly optimal answer to a polynomial
  * subproblem, and it should not be mistaken for the metaheuristic's output.
+ * The routes are light-cased and dark-cored; this is the inverse, so the two
+ * are told apart by their construction and not only by their colour. The
+ * inversion is also what carries it across all three base layers: the navy
+ * ribbon reads on the pale map and on imagery, and where the ribbon itself
+ * goes quiet — on the dark basemap — the white dashes take over.
  */
 export function ExactRouteLayer({ route }: { route: ExactRoute | null }) {
   const map = useMap();
@@ -312,12 +416,17 @@ export function ExactRouteLayer({ route }: { route: ExactRoute | null }) {
     if (!route || route.points.length < 2) return undefined;
     const group = L.layerGroup();
     group.addLayer(
-      L.polyline(route.points, { color: '#0b0e12', weight: 7, opacity: 0.7, interactive: false }),
+      L.polyline(route.points, {
+        color: token('--navy'),
+        weight: 8,
+        opacity: 0.85,
+        interactive: false,
+      }),
     );
     const path = L.polyline(route.points, {
-      color: '#f2f6fb',
-      weight: 2.5,
-      opacity: 0.95,
+      color: casing(),
+      weight: 3,
+      opacity: 1,
       dashArray: '9 5',
     });
     path.bindTooltip(

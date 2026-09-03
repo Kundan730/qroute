@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
+import { BASEMAPS, DEFAULT_BASEMAP, getBasemap, type BasemapId } from '../components/map/basemaps';
 import 'leaflet/dist/leaflet.css';
 import type { EventKind } from '../api/types';
 import { Legend } from '../components/map/Legend';
@@ -61,6 +62,8 @@ export function MapPage() {
   const run = useRunStore();
 
   const [chosenAlgorithm, setAlgorithm] = useState('qpso');
+  const [basemapId, setBasemapId] = useState<BasemapId>(DEFAULT_BASEMAP);
+  const basemap = getBasemap(basemapId);
   const [seconds, setSeconds] = useState(10);
 
   // Derived rather than corrected in an effect, so the form never renders with
@@ -361,7 +364,30 @@ export function MapPage() {
       </aside>
 
       {/* ------------------------------------------------------------ map */}
-      <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
+      <div
+        className={basemap.bodyClass}
+        style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}
+      >
+        {/* Sits over the map rather than in a rail: it changes what you are
+            looking at, so it belongs on the thing it changes. */}
+        <div
+          className="basemap-switch"
+          style={{ position: 'absolute', top: 12, right: 12, zIndex: 500, boxShadow: 'var(--shadow-float)' }}
+          role="group"
+          aria-label="Base map"
+        >
+          {BASEMAPS.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              aria-pressed={b.id === basemapId}
+              title={b.purpose}
+              onClick={() => setBasemapId(b.id)}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
         <MapContainer
           center={center}
           zoom={14}
@@ -369,18 +395,12 @@ export function MapPage() {
           style={{ height: '100%', width: '100%' }}
           zoomControl
         >
-          {/*
-            Standard OpenStreetMap tiles, desaturated and darkened by the
-            `.leaflet-tile-pane` filter in the stylesheet. A key-free source is
-            deliberate: the demonstration must not fail because a tile provider
-            wants an API key, and if the tiles do not load at all the road
-            network still draws, because the roads are the data and the basemap
-            is only context.
-          */}
           <TileLayer
-            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            maxZoom={19}
+            key={basemap.id}
+            url={basemap.url}
+            attribution={basemap.attribution}
+            maxZoom={basemap.maxZoom}
+            {...(basemap.subdomains ? { subdomains: basemap.subdomains } : {})}
           />
           <EdgeLayer
             edges={map.edges}
@@ -401,7 +421,19 @@ export function MapPage() {
           straightLine={straightLine}
         />
         {map.error && (
-          <div style={{ position: 'absolute', top: 12, left: 12, right: 12, zIndex: 500 }}>
+          // Kept clear of the basemap switch in the top-right corner, which
+          // previously sat underneath this banner and became unclickable
+          // exactly when something had gone wrong.
+          <div
+            style={{
+              position: 'absolute',
+              top: 12,
+              left: 56,
+              maxWidth: 460,
+              zIndex: 600,
+              boxShadow: 'var(--shadow-float)',
+            }}
+          >
             <Notice kind="error">{map.error}</Notice>
           </div>
         )}

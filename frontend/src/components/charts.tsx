@@ -1,11 +1,18 @@
 /**
- * Recharts wrappers with a shared dark theme.
+ * Recharts wrappers bound to the light design system.
  *
  * Every chart in the platform is built from these so that grid lines, axis
  * colours, tick density and tooltip styling are decided once. Axis labels
  * always carry units: an unlabelled convergence curve is the single easiest way
  * to make a result look better than it is, and this project is trying to do the
  * opposite.
+ *
+ * Recharts needs literal colour strings rather than `var(--token)`, because the
+ * values reach SVG attributes and a canvas-side measurement pass. So the tokens
+ * are read back off `:root` at use time through `token()` below, and nothing in
+ * this file carries a hex of its own. The read is memoised only once it returns
+ * a non-empty string, which means a call that happens before the stylesheet has
+ * been applied falls back rather than poisoning the cache.
  */
 
 import type { ReactNode } from 'react';
@@ -19,23 +26,132 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import type { DotItemDotProps } from 'recharts';
 import type { RunTick } from '../api/types';
 import { fmt, fmtCompact } from '../lib/format';
 
+/* -------------------------------------------------------------------------- */
+/* design tokens                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Last-resort values, used only when this module is evaluated with no document
+ * (tests, SSR) or before `global.css` has been applied. They mirror `:root`.
+ */
+const FALLBACK: Record<string, string> = {
+  '--panel': '#ffffff',
+  '--border': '#dce0e8',
+  '--border-strong': '#c2c8d4',
+  '--text': '#1c273b',
+  '--text-dim': '#5a6376',
+  '--text-faint': '#868da0',
+  '--navy': '#1c273b',
+  '--navy-300': '#686f7c',
+  '--accent': '#3b5bd9',
+  '--violet': '#5b4fcf',
+  '--radius': '3px',
+  '--shadow-float': '0 1px 2px rgba(28, 39, 59, 0.08), 0 8px 24px rgba(28, 39, 59, 0.1)',
+  '--font': "'DM Sans', ui-sans-serif, system-ui, sans-serif",
+  '--display': "'Urbanist', 'DM Sans', ui-sans-serif, system-ui, sans-serif",
+  '--mono': "'DM Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+};
+
+const TOKEN_CACHE = new Map<string, string>();
+
+/** Read a custom property off `:root`, memoised once it actually resolves. */
+export function token(name: string): string {
+  const cached = TOKEN_CACHE.get(name);
+  if (cached) return cached;
+  let read = '';
+  if (typeof document !== 'undefined' && document.documentElement) {
+    read = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  if (read) {
+    TOKEN_CACHE.set(name, read);
+    return read;
+  }
+  return FALLBACK[name] ?? FALLBACK['--text'];
+}
+
+/** `#rrggbb` at a given alpha, for the faint fills under a series. */
+function alpha(hex: string, a: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/**
+ * Axis chrome. Hairlines in `--border`, marks in `--text-faint`, and the tick
+ * text one step darker in `--text-dim`: `--text-faint` measures 3.25:1 on the
+ * white panel, which is fine for a mark but short of the 4.5:1 a label owes the
+ * reader. Getters rather than a frozen literal, so the values survive a module
+ * evaluated ahead of first paint.
+ */
 const AXIS = {
-  stroke: '#4a5462',
-  tick: { fill: '#8b97a8', fontSize: 11 },
-  label: { fill: '#6b7889', fontSize: 11 },
+  get stroke(): string {
+    return token('--border');
+  },
+  get tick(): { fill: string; fontSize: number; fontFamily: string } {
+    return { fill: token('--text-dim'), fontSize: 10, fontFamily: token('--mono') };
+  },
+  get label(): { fill: string; fontSize: number; fontFamily: string; letterSpacing: string } {
+    return {
+      fill: token('--text-dim'),
+      fontSize: 10,
+      fontFamily: token('--display'),
+      letterSpacing: '0.06em',
+    };
+  },
 };
 
 const TOOLTIP_STYLE = {
-  background: '#171d25',
-  border: '1px solid #35404e',
-  borderRadius: 4,
+  get background(): string {
+    return token('--panel');
+  },
+  get border(): string {
+    return `1px solid ${token('--border-strong')}`;
+  },
+  get borderRadius(): string {
+    return token('--radius');
+  },
+  get boxShadow(): string {
+    return token('--shadow-float');
+  },
+  get color(): string {
+    return token('--text');
+  },
+  get fontFamily(): string {
+    return token('--font');
+  },
   fontSize: 12,
-  color: '#dce3ec',
-  padding: '6px 9px',
+  padding: '7px 10px',
 };
+
+/** The `t = …` line above the values: a label, so it takes the label voice. */
+function tooltipLabelStyle() {
+  return {
+    color: token('--text-dim'),
+    fontFamily: token('--display'),
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: '0.08em',
+    marginBottom: 3,
+  };
+}
+
+/** Values are digits, so they are mono and tabular. */
+function tooltipItemStyle() {
+  return {
+    color: token('--text'),
+    fontFamily: token('--mono'),
+    fontSize: 11,
+    fontVariantNumeric: 'tabular-nums' as const,
+    padding: 0,
+  };
+}
+
+const GRID_DASH = '2 4';
 
 export function ChartFrame({ height, children }: { height: number; children: ReactNode }) {
   return (
@@ -45,6 +161,29 @@ export function ChartFrame({ height, children }: { height: number; children: Rea
       </ResponsiveContainer>
     </div>
   );
+}
+
+/**
+ * Marks the final sample of a series and nothing else.
+ *
+ * A convergence curve is read for where it ended up, so the last point gets a
+ * filled dot inside a halo of the same hue; every other index renders an empty
+ * group, which keeps the line clean.
+ */
+function finalDot(color: string, lastIndex: number) {
+  return function FinalDot(props: DotItemDotProps) {
+    const { cx, cy, index } = props;
+    const key = `pt-${index}`;
+    if (index !== lastIndex || typeof cx !== 'number' || typeof cy !== 'number') {
+      return <g key={key} />;
+    }
+    return (
+      <g key={key}>
+        <circle cx={cx} cy={cy} r={5} fill={alpha(color, 0.16)} />
+        <circle cx={cx} cy={cy} r={2.6} fill={color} stroke={token('--panel')} strokeWidth={1} />
+      </g>
+    );
+  };
 }
 
 /**
@@ -70,22 +209,28 @@ export function ConvergenceChart({
     mean: Number.isFinite(t.mean_cost) ? t.mean_cost : null,
   }));
 
+  const bestColor = token('--accent');
+  const meanColor = token('--navy-300');
+  const refColor = token('--navy');
+
   return (
     <ChartFrame height={height}>
       <LineChart data={data} margin={{ top: 8, right: 16, bottom: 22, left: 8 }}>
-        <CartesianGrid stroke="#232b35" strokeDasharray="2 4" />
+        <CartesianGrid stroke={token('--border')} strokeDasharray={GRID_DASH} vertical={false} />
         <XAxis
           dataKey="elapsed"
           type="number"
           domain={['dataMin', 'dataMax']}
           stroke={AXIS.stroke}
           tick={AXIS.tick}
+          tickLine={{ stroke: token('--border') }}
           tickFormatter={(v: number) => `${fmt(v, 1)}`}
           label={{ value: 'elapsed (s)', position: 'insideBottom', offset: -12, style: AXIS.label }}
         />
         <YAxis
           stroke={AXIS.stroke}
           tick={AXIS.tick}
+          tickLine={{ stroke: token('--border') }}
           width={62}
           domain={['auto', 'auto']}
           tickFormatter={(v: number) => fmtCompact(v)}
@@ -99,19 +244,24 @@ export function ConvergenceChart({
         />
         <Tooltip
           contentStyle={TOOLTIP_STYLE}
+          labelStyle={tooltipLabelStyle()}
+          itemStyle={tooltipItemStyle()}
+          cursor={{ stroke: token('--border-strong'), strokeDasharray: GRID_DASH }}
           labelFormatter={(v) => `t = ${fmt(Number(v), 2)} s`}
           formatter={(value: unknown, name: unknown) => [fmt(Number(value), 2), String(name)]}
         />
         {reference !== null && Number.isFinite(reference) && (
           <ReferenceLine
             y={reference}
-            stroke="#7fc7a2"
+            stroke={refColor}
             strokeDasharray="5 4"
+            strokeWidth={1}
             label={{
               value: `best known ${fmt(reference, 1)}`,
               position: 'insideTopRight',
-              fill: '#7fc7a2',
-              fontSize: 11,
+              fill: refColor,
+              fontSize: 10,
+              fontFamily: token('--mono'),
             }}
           />
         )}
@@ -119,9 +269,10 @@ export function ConvergenceChart({
           type="monotone"
           dataKey="best"
           name="best"
-          stroke="#5b93e6"
-          strokeWidth={2}
-          dot={false}
+          stroke={bestColor}
+          strokeWidth={1.8}
+          dot={finalDot(bestColor, data.length - 1)}
+          activeDot={{ r: 3, fill: bestColor, stroke: token('--panel'), strokeWidth: 1 }}
           isAnimationActive={false}
           connectNulls
         />
@@ -129,10 +280,11 @@ export function ConvergenceChart({
           type="monotone"
           dataKey="mean"
           name="population mean"
-          stroke="#7c8797"
-          strokeWidth={1.2}
+          stroke={meanColor}
+          strokeWidth={1.1}
           strokeDasharray="3 3"
           dot={false}
+          activeDot={{ r: 2.6, fill: meanColor, stroke: token('--panel'), strokeWidth: 1 }}
           isAnimationActive={false}
           connectNulls
         />
@@ -153,22 +305,26 @@ export function DiversityChart({ ticks, height = 150 }: { ticks: RunTick[]; heig
     elapsed: Number(t.elapsed.toFixed(3)),
     diversity: Number.isFinite(t.diversity) ? t.diversity : null,
   }));
+  const lineColor = token('--violet');
+
   return (
     <ChartFrame height={height}>
       <LineChart data={data} margin={{ top: 8, right: 16, bottom: 22, left: 8 }}>
-        <CartesianGrid stroke="#232b35" strokeDasharray="2 4" />
+        <CartesianGrid stroke={token('--border')} strokeDasharray={GRID_DASH} vertical={false} />
         <XAxis
           dataKey="elapsed"
           type="number"
           domain={['dataMin', 'dataMax']}
           stroke={AXIS.stroke}
           tick={AXIS.tick}
+          tickLine={{ stroke: token('--border') }}
           tickFormatter={(v: number) => fmt(v, 1)}
           label={{ value: 'elapsed (s)', position: 'insideBottom', offset: -12, style: AXIS.label }}
         />
         <YAxis
           stroke={AXIS.stroke}
           tick={AXIS.tick}
+          tickLine={{ stroke: token('--border') }}
           width={62}
           tickFormatter={(v: number) => fmt(v, 2)}
           label={{
@@ -181,15 +337,20 @@ export function DiversityChart({ ticks, height = 150 }: { ticks: RunTick[]; heig
         />
         <Tooltip
           contentStyle={TOOLTIP_STYLE}
+          labelStyle={tooltipLabelStyle()}
+          itemStyle={tooltipItemStyle()}
+          cursor={{ stroke: token('--border-strong'), strokeDasharray: GRID_DASH }}
           labelFormatter={(v) => `t = ${fmt(Number(v), 2)} s`}
           formatter={(value: unknown) => [fmt(Number(value), 4), 'diversity']}
         />
         <Line
           type="monotone"
           dataKey="diversity"
-          stroke="#c9a63f"
-          strokeWidth={1.6}
-          dot={false}
+          name="diversity"
+          stroke={lineColor}
+          strokeWidth={1.5}
+          dot={finalDot(lineColor, data.length - 1)}
+          activeDot={{ r: 2.8, fill: lineColor, stroke: token('--panel'), strokeWidth: 1 }}
           isAnimationActive={false}
           connectNulls
         />
