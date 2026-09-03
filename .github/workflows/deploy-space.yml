@@ -33,7 +33,11 @@ on:
   workflow_dispatch:
 
 env:
-  HF_USERNAME: Kundan730
+  # Note: the Hugging Face account is Kundan30, which is NOT the same as the
+  # GitHub account (Kundan730). They are different services and the usernames
+  # differ by a digit, which is exactly the sort of thing that produces a 404
+  # from a push and half an hour of confusion.
+  HF_USERNAME: Kundan30
   HF_SPACE: qroute
 
 jobs:
