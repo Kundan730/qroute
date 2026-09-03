@@ -216,8 +216,14 @@ def split_tour(tour, cost, demand, capacity, max_routes, service, tw, veh_cost,
 
 
 @njit(cache=CACHE)
-def labels_to_routes(tour, labels, n_max_routes):
-    """Reconstruct ``(flat, starts, n_routes)`` from a split predecessor array."""
+def labels_to_routes(tour, labels):
+    """Reconstruct ``(flat, starts, n_routes)`` from a split predecessor array.
+
+    The route count is fixed by the label chain that ``split_tour`` produced, so
+    no fleet bound is taken here: the split has already either respected the
+    fleet or deliberately overrun it, and silently truncating its answer would
+    drop customers rather than surface the violation the penalty term prices.
+    """
     n = tour.shape[0]
     # Walk the predecessor chain backwards collecting route end positions.
     ends = np.zeros(n + 1, np.int32)
@@ -248,18 +254,6 @@ def labels_to_routes(tour, labels, n_max_routes):
 # --------------------------------------------------------------------------
 # Evaluation
 # --------------------------------------------------------------------------
-@njit(cache=CACHE, fastmath=FASTMATH)
-def route_cost(route, cost):
-    """Closed-tour cost of one route, depot to depot."""
-    if route.shape[0] == 0:
-        return 0.0
-    c = cost[0, route[0]]
-    for i in range(route.shape[0] - 1):
-        c += cost[route[i], route[i + 1]]
-    c += cost[route[-1], 0]
-    return c
-
-
 @njit(cache=CACHE, fastmath=FASTMATH)
 def evaluate(flat, starts, n_routes, cost, demand, capacity, service, tw,
              max_duration, pen_cap, pen_tw, pen_dur, veh_cost):

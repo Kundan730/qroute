@@ -1,0 +1,204 @@
+# Continuous integration for qroute.
+#
+# One job on one platform. A matrix over three Python versions and two operating
+# systems would triple the wall clock and the maintenance for a submission that
+# is deployed on exactly one configuration; when nobody reads the extra cells,
+# they stop being evidence and start being decoration. The single configuration
+# here is the one the Dockerfile and docs/deployment.md describe: Linux,
+# Python 3.13, Node 22.
+#
+# What this job is for: proving that a clean checkout on a machine that is not
+# the author's installs, passes its tests, type-checks, builds, and starts.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  # So the job can be run by hand against a branch before opening a PR.
+  workflow_dispatch:
+
+# A new push to the same branch makes the run in progress obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: install, test, build
+    runs-on: ubuntu-latest
+    # The suite takes about six minutes on a ten-core machine and rather longer
+    # on a two-core hosted runner, because a good part of it is solvers running
+    # against real wall-clock budgets. 45 minutes is a ceiling that catches a
+    # hang without failing an honestly slow run.
+    timeout-minutes: 45
+
+    env:
+      # Not strictly needed while the job runs from the checkout, but it makes
+      # every step independent of the working directory it happens to run in,
+      # which is the property the deployment documentation promises.
+      QROUTE_DATA: ${{ github.workspace }}/data
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # Python
+      # ------------------------------------------------------------------
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the package and its test dependencies
+        # Editable, because that is what the README tells a reader to do and CI
+        # should exercise the documented path. The `baselines` extra installs
+        # PyVRP: without it four tests in tests/test_exact.py skip themselves,
+        # and a green run that quietly skipped the reference solver is not the
+        # signal this job exists to give.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,baselines]"
+
+      - name: Report the versions every result depends on
+        # Not a check, a record. When a test starts failing six weeks from now
+        # this is the log line that says which dependency moved.
+        run: qroute version
+
+      - name: Run the Python test suite
+        run: python -m pytest tests/ -q
+
+      # ------------------------------------------------------------------
+      # Front end
+      # ------------------------------------------------------------------
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install front-end dependencies
+        # `npm ci` installs exactly what the lockfile records and fails if
+        # package.json and package-lock.json have drifted apart, which `npm
+        # install` would silently repair.
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check the front end
+        # `npm run build` runs `tsc -b` itself, so this step is not strictly
+        # required — but it makes a type error fail on a step named "type-check"
+        # instead of inside a bundler log, which is the difference between a
+        # five-second diagnosis and a five-minute one.
+        working-directory: frontend
+        run: npx tsc -b
+
+      - name: Build the front end
+        working-directory: frontend
+        run: npm run build
+
+      - name: Check the built front end is where the API expects it
+        # frontend/dist is what the API mounts at "/". If the build ever starts
+        # writing somewhere else, the container would serve a JSON stub instead
+        # of the application and every other check here would still be green.
+        run: test -f frontend/dist/index.html
+
+      # ------------------------------------------------------------------
+      # Does it actually start?
+      # ------------------------------------------------------------------
+      - name: Start the API and wait for it to report healthy
+        # An import error, a missing route or a broken static mount survives the
+        # unit tests in ways that are obvious the moment the real server boots.
+        # This starts it exactly as the container does and polls the same
+        # endpoint the container's HEALTHCHECK polls.
+        #
+        # QROUTE_API_PRELOAD=none because the road graphs are gitignored and
+        # absent on a fresh checkout; with the default the server would spend
+        # the startup window logging that it has nothing to preload.
+        run: |
+          # nohup so that the server is not sent SIGHUP when this step's shell
+          # exits; it has to outlive the step for the two checks that follow.
+          QROUTE_API_PRELOAD=none nohup qroute serve --host 127.0.0.1 --port 8000 \
+            > "$RUNNER_TEMP/qroute-api.log" 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 60); do
+            # stderr is discarded inside the loop: until the server is up every
+            # attempt prints "connection refused", and sixty of those bury the
+            # one message that matters.
+            if curl -fsS --max-time 5 http://127.0.0.1:8000/api/health \
+                 > "$RUNNER_TEMP/health.json" 2>/dev/null; then
+              echo "healthy after ${attempt} attempt(s)"
+              cat "$RUNNER_TEMP/health.json"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the API did not become healthy within 120 seconds"
+          cat "$RUNNER_TEMP/qroute-api.log"
+          exit 1
+
+      - name: Check the API serves the built front end at the root
+        # The API mounts frontend/dist at "/" only when the build is present, and
+        # falls back to a JSON stub when it is not. Asserting on HTML here is
+        # what distinguishes "the server started" from "the platform started".
+        run: |
+          content_type=$(curl -fsS -o /dev/null -w '%{content_type}' --max-time 10 http://127.0.0.1:8000/)
+          echo "root content-type: $content_type"
+          case "$content_type" in
+            text/html*) ;;
+            *) echo "::error::expected HTML at /, got '$content_type'"; exit 1 ;;
+          esac
+
+      - name: Check the command line works from outside the checkout
+        # The house rule is that nothing may depend on the working directory
+        # being the repository root unless that is documented and enforced. The
+        # first command is the positive half: the same invocation, run from a
+        # directory that contains nothing, with QROUTE_DATA (set for the whole
+        # job) as the anchor.
+        #
+        # The second is the half that gives the first its meaning. An editable
+        # install resolves its data directory from the package location, so the
+        # positive command would pass even if QROUTE_DATA were ignored
+        # completely — it cannot fail for the reason it is here to guard
+        # against. Pointing the variable at a directory that is not a qroute
+        # data root must therefore fail, and fail with the documented message
+        # rather than a traceback: that is what proves the variable is read and
+        # that "enforced with a clear error" is true and not just intended.
+        run: |
+          cd "$RUNNER_TEMP"
+          qroute instances --family cvrp --max-size 40
+
+          mkdir -p "$RUNNER_TEMP/not-a-data-root"
+          if QROUTE_DATA="$RUNNER_TEMP/not-a-data-root" qroute instances \
+               --family cvrp > "$RUNNER_TEMP/bad-data-root.txt" 2>&1; then
+            echo "::error::a bogus QROUTE_DATA was accepted; the variable is not being read"
+            cat "$RUNNER_TEMP/bad-data-root.txt"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/bad-data-root.txt"
+          grep -q "no benchmark instances were found" "$RUNNER_TEMP/bad-data-root.txt" || {
+            echo "::error::a bogus QROUTE_DATA failed, but not with the documented message"
+            exit 1
+          }
+          if grep -q "Traceback" "$RUNNER_TEMP/bad-data-root.txt"; then
+            echo "::error::a bogus QROUTE_DATA produced a traceback instead of an error message"
+            exit 1
+          fi
+          echo "a bogus QROUTE_DATA is rejected with the documented message"
+
+      - name: Show the server log
+        # Runs even when an earlier step failed, because when the health poll
+        # times out this log is the only thing that says why.
+        if: always()
+        run: cat "$RUNNER_TEMP/qroute-api.log" || true
+
+      - name: Stop the API
+        if: always()
+        run: kill "$SERVER_PID" 2>/dev/null || true

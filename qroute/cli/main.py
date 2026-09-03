@@ -37,10 +37,12 @@ from __future__ import annotations
 import ast
 import json
 import math
+import signal
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Any, Callable, Optional
+from typing import Annotated, Any, Callable, Iterator, Optional
 
 import typer
 from rich.text import Text
@@ -86,6 +88,22 @@ SEED_BLIND_SOLVERS = frozenset({"ortools", "ortools_gls"})
 #: developed alongside this one, so ``serve`` probes rather than assuming.
 API_CANDIDATES = ("qroute.api.app:app", "qroute.api.main:app", "qroute.api:app")
 
+#: Exit code for a run stopped by the operator. 128 + SIGINT is the shell
+#: convention, and it lets a script tell "the user pressed Ctrl-C" apart from
+#: "the command failed", which exit code 1 would not.
+EXIT_INTERRUPTED = 130
+
+#: Largest seed accepted. NumPy's ``SeedSequence`` takes far larger integers,
+#: but a seed is also written into result files and quoted in the report, and a
+#: value that does not survive a round trip through JSON's 64-bit integers is
+#: not reproducible. Refusing above this is a promise the tool can keep.
+MAX_SEED = 2 ** 63 - 1
+
+#: Budgets below this are accepted but flagged. Constructing the first solution
+#: on a medium instance takes tens of milliseconds, so a budget of a few
+#: milliseconds measures the constructor, not the search.
+SHORT_BUDGET_SECONDS = 0.5
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -96,6 +114,123 @@ def _fail(message: str, hint: str = "") -> "typer.Exit":
     if hint:
         err.print(f"[dim]{hint}[/dim]")
     return typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# Argument validation
+#
+# The library raises perfectly good exceptions for a nonsensical seed or budget,
+# but they surface as a rich traceback through five frames of NumPy, which tells
+# a user that the program broke rather than that they mistyped. Everything the
+# command line accepts from a person is therefore checked at the boundary, where
+# the option's own name can be quoted back.
+# ---------------------------------------------------------------------------
+def _check_seed(seed: int, option: str = "--seed") -> int:
+    """Validate a random seed."""
+    if seed < 0:
+        raise _fail(f"{option} must not be negative, got {seed}",
+                    "seeds index a reproducible stream, so any integer from 0 upwards")
+    if seed > MAX_SEED:
+        raise _fail(f"{option} must be at most {MAX_SEED}, got {seed}",
+                    "larger seeds do not survive being written to the result files")
+    return int(seed)
+
+
+def _check_seconds(seconds: float, option: str = "--seconds") -> float:
+    """Validate a wall-clock budget, warning about one too short to mean much."""
+    if seconds != seconds or math.isinf(seconds):        # NaN or infinity
+        raise _fail(f"{option} must be a finite number of seconds, got {seconds!r}")
+    if seconds <= 0:
+        raise _fail(f"{option} must be greater than zero, got {seconds:g}",
+                    "a budget of zero leaves no time to search, and the answer "
+                    "would be whatever the construction heuristic produced")
+    if seconds < SHORT_BUDGET_SECONDS:
+        err.print(f"[yellow]{option} {seconds:g} s is shorter than the time it takes to "
+                  f"build a first solution on most instances; expect the result to be "
+                  f"the construction heuristic rather than a search.[/yellow]")
+    return float(seconds)
+
+
+def _check_count(value: int, option: str, minimum: int = 1) -> int:
+    """Validate a count option such as ``--seeds`` or ``--customers``."""
+    if value < minimum:
+        raise _fail(f"{option} must be at least {minimum}, got {value}")
+    return int(value)
+
+
+# ---------------------------------------------------------------------------
+# Interrupts
+# ---------------------------------------------------------------------------
+#: Set by the handler installed in :func:`interruptible`. It exists because an
+#: interrupt that lands inside a numba kernel does not arrive as a
+#: ``KeyboardInterrupt``: numba's dispatcher notices that an exception is set
+#: when the compiled function returns and raises ``SystemError: CPUDispatcher
+#: (local_search) returned a result with an exception set`` instead. That is
+#: indistinguishable from a genuine numba bug unless we remember that a signal
+#: arrived, so this flag is the evidence.
+_SIGINT_SEEN = False
+
+
+def _interrupt_handler(signum: int, frame: Any) -> None:
+    global _SIGINT_SEEN
+    _SIGINT_SEEN = True
+    raise KeyboardInterrupt
+
+
+@contextmanager
+def interruptible(activity: str, exit_code: int = EXIT_INTERRUPTED) -> Iterator[None]:
+    """Turn Ctrl-C during ``activity`` into a clean message and a real exit code.
+
+    Without this, interrupting a solve produced a full rich traceback ending in
+    ``SystemError: CPUDispatcher(<function local_search ...>) returned a result
+    with an exception set`` and exit code 1 - an alarming compiler-level message
+    for what is simply someone changing their mind about a long run.
+
+    The handler is installed only for the duration of the block and only in the
+    main thread, so importing this module or using it from a server thread
+    changes nothing about how signals behave elsewhere.
+    """
+    global _SIGINT_SEEN
+    previous = None
+    installed = False
+    _SIGINT_SEEN = False
+    try:
+        previous = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, _interrupt_handler)
+        installed = True
+    except ValueError:            # not the main thread; leave signals alone
+        pass
+
+    try:
+        yield
+    except KeyboardInterrupt:
+        raise _interrupted(activity, exit_code)
+    except SystemError:
+        # Only a SystemError that followed a signal is ours to interpret. A
+        # SystemError without one is a real defect and must keep its traceback.
+        if not _SIGINT_SEEN:
+            raise
+        raise _interrupted(activity, exit_code)
+    else:
+        if _SIGINT_SEEN:
+            # The interrupt arrived but never reached us. numba turns it into a
+            # SystemError, and if that lands inside the optimiser's final repair
+            # step - which is guarded by ``except Exception`` so a failed repair
+            # cannot lose the solution - it is recorded as a note instead of
+            # being re-raised. Observed once in five interrupts of a large
+            # instance: a full result table and exit code 0 for a run the
+            # operator had cancelled. What is on screen came from a search that
+            # was stopped early, so it is not reported as a finished run.
+            raise _interrupted(activity, exit_code)
+    finally:
+        if installed:
+            signal.signal(signal.SIGINT, previous)
+
+
+def _interrupted(activity: str, exit_code: int) -> "typer.Exit":
+    err.print(f"\n[bold yellow]interrupted[/bold yellow] {activity} was stopped before "
+              f"it finished; no result is reported.")
+    return typer.Exit(code=exit_code)
 
 
 def _parse_params(items: Optional[list[str]]) -> dict[str, Any]:
@@ -123,15 +258,52 @@ def _parse_params(items: Optional[list[str]]) -> dict[str, Any]:
     return out
 
 
+def _anchor_data_root() -> None:
+    """Point the data lookup at the installation rather than the shell's cwd.
+
+    :mod:`qroute.problems.loaders` and :mod:`qroute.graph.osm` read
+    ``QROUTE_DATA`` when they are imported and default it to the relative path
+    ``"data"``, so every command that reads an instance used to work only when
+    it was run from inside the checkout. :mod:`qroute.config` resolves an
+    absolute root and publishes it, which is what the HTTP service already does;
+    calling it here, before those modules are imported, gives the command line
+    the same answer.
+
+    It has to be the *first* statement of a command that reads data, before that
+    command's own imports: ``qroute osm build`` pulls in the graph package on its
+    first line, and by then the directory constant has already been computed.
+    Calling it per command rather than from a Typer callback keeps that ordering
+    visible at each call site, and keeps the commands that read no data - and so
+    need no data root - from failing on a misconfigured one.
+    """
+    try:
+        from qroute.config import ConfigError, settings
+    except ImportError:            # the settings module is optional to the CLI
+        return
+    try:
+        settings().export_to_environment()
+    except ConfigError as exc:
+        raise _fail(str(exc))
+
+
 def _load_instance(name: str):
     """Load a benchmark instance by name or path, with a useful error message."""
-    from qroute.problems.loaders import list_instances, load
+    from qroute.problems.loaders import DATA_ROOT, list_instances, load
 
     try:
         return load(name)
     except FileNotFoundError:
         available = list_instances()
         pool = available["cvrp"] + available["vrptw"]
+        if not pool:
+            # Nothing at all was found, which is a different mistake from
+            # mistyping a name and deserves a different answer: the data
+            # directory itself is missing or is not where it is being looked for.
+            raise _fail(
+                f"no benchmark instances were found under {Path(DATA_ROOT).resolve()}",
+                "that directory should contain benchmarks/cvrplib; set QROUTE_DATA "
+                "to the data directory of a qroute checkout if it lives elsewhere",
+            )
         close = [n for n in pool if n.lower().startswith(name.lower()[:3])][:8]
         raise _fail(
             f"instance {name!r} was not found",
@@ -175,6 +347,50 @@ def _solve_once(algorithm: str, instance, seconds: float, seed: int,
         f"unknown algorithm {algorithm!r}",
         "available: " + ", ".join(list(ALGORITHMS) + list(EXTERNAL_SOLVERS)),
     )
+
+
+def _warm(algorithm: str) -> None:
+    """Compile the solver's kernels before any clock starts, and say what happened.
+
+    numba compiles on first call, so on a machine whose cache is cold the first
+    timed run spends its entire budget inside the compiler and then reports the
+    construction heuristic's tour as its answer. Measured on this project:
+    ``qroute solve A-n32-k5 -t 5`` with an empty cache finished zero iterations
+    and ran for 11.7 wall-clock seconds. Warming first costs the same time but
+    spends it honestly, outside the budget, and once per machine.
+    """
+    from qroute.benchmark.runner import warm_kernels
+
+    with con.status(f"preparing the compiled kernels for {algorithm}"):
+        warm = warm_kernels(algorithm)
+    if warm.error:
+        err.print(f"[yellow]the compiled kernels could not be warmed "
+                  f"({warm.error}). The run below pays for compilation out of its "
+                  f"own time budget, so its iteration count and its wall clock do "
+                  f"not mean what they usually mean.[/yellow]")
+    elif warm.seconds >= 1.0:
+        con.print(f"[dim]compiled the search kernels in "
+                  f"{render.format_seconds(warm.seconds)}; this happens once per "
+                  f"machine and is not counted against the budget[/dim]")
+
+
+def _check_budget_was_spent_searching(result: Any, seconds: float, elapsed: float) -> None:
+    """Say so when a run did not actually search, instead of quietly reporting it.
+
+    Zero iterations means the answer on screen is whatever the constructor
+    built. That can happen after a failed warm-up, on a budget of a few
+    milliseconds, or on a machine so loaded that nothing got a turn. Whatever
+    the cause, presenting it as a result of the optimiser would be a false claim.
+    """
+    if getattr(result, "iterations", 0) <= 0:
+        err.print("[bold yellow]no search iteration completed within the budget[/bold yellow]"
+                  " - the solution above is the construction heuristic's, not the "
+                  "optimiser's. Give it more time with --seconds.")
+    elif elapsed > max(seconds * 1.5, seconds + 2.0):
+        err.print(f"[yellow]the run took {render.format_seconds(elapsed)} for a "
+                  f"{render.format_seconds(seconds)} budget; the excess was spent "
+                  f"outside the search loop (compilation or start-up), so compare "
+                  f"the iteration count rather than the wall clock.[/yellow]")
 
 
 def _progress(transient: bool = True):
@@ -291,8 +507,13 @@ def solve(
                            help="Print the per-route breakdown.")] = True,
 ) -> None:
     """Solve one instance and report cost, gap, feasibility and throughput."""
+    _anchor_data_root()
+    seed = _check_seed(seed)
+    seconds = _check_seconds(seconds)
+    iterations = _check_count(iterations, "--iterations")
     inst = _load_instance(instance)
     kwargs = _parse_params(params)
+    _warm(algorithm)
 
     state = {"best": float("inf"), "iteration": 0}
     with _progress() as progress:
@@ -305,11 +526,13 @@ def solve(
                             description=f"{algorithm} on {inst.name}  best {record.best_cost:,.2f}")
 
         started = time.perf_counter()
-        result = _solve_once(algorithm, inst, seconds, seed, kwargs, on_iteration, iterations)
+        with interruptible(f"{algorithm} on {inst.name}"):
+            result = _solve_once(algorithm, inst, seconds, seed, kwargs, on_iteration, iterations)
         elapsed = time.perf_counter() - started
         progress.update(task, completed=seconds)
 
     con.print(render.solve_table(result, inst, elapsed))
+    _check_budget_was_spent_searching(result, seconds, elapsed)
     if result.history:
         line, first, last = render.convergence_line(result.history)
         con.print(f"\n[bold]convergence[/bold] {line}")
@@ -348,17 +571,24 @@ def compare(
     command-line comparison can afford, treat the test as an indication and the
     full ``bench`` sweep as the evidence.
     """
+    _anchor_data_root()
+
     import numpy as np
 
     from qroute.benchmark.stats import wilcoxon
     from qroute.core.rng import spawn_seeds
 
+    seeds = _check_count(seeds, "--seeds")
+    seconds = _check_seconds(seconds)
+    master_seed = _check_seed(master_seed, "--master-seed")
     inst = _load_instance(instance)
     names = [a.strip() for a in algorithms.split(",") if a.strip()]
     if not names:
         raise _fail("no algorithms given")
     run_seeds = spawn_seeds(master_seed, seeds)
     bks = inst.meta.get("bks")
+    for name in names:
+        _warm(name)
 
     runs: dict[str, list[dict]] = {name: [] for name in names}
     with _progress() as progress:
@@ -366,7 +596,8 @@ def compare(
         for name in names:
             for k, seed in enumerate(run_seeds):
                 progress.update(task, description=f"{name} seed {k + 1}/{seeds}")
-                result = _solve_once(name, inst, seconds, seed, {})
+                with interruptible(f"the comparison on {inst.name}"):
+                    result = _solve_once(name, inst, seconds, seed, {})
                 runs[name].append({
                     "algorithm": name, "seed": int(seed), "seed_index": k,
                     "cost": float(result.best.cost),
@@ -462,9 +693,20 @@ def bench(
     out: Annotated[Optional[Path], typer.Option("--out", help="Override the output directory.")] = None,
     workers: Annotated[Optional[int], typer.Option("--workers", help="Override the worker count.")] = None,
     name: Annotated[Optional[str], typer.Option("--name", help="Override the run name.")] = None,
+    force: Annotated[bool, typer.Option("--force/--no-force",
+                     help="Overwrite results already in the output directory.")] = False,
 ) -> None:
-    """Run a full benchmark sweep and write reproducible results to disk."""
-    from qroute.benchmark.runner import BenchmarkConfig, BenchmarkRunner
+    """Run a full benchmark sweep and write reproducible results to disk.
+
+    A sweep refuses to write into a directory that already holds results.
+    Re-running a configuration out of habit used to empty the previous rows file
+    before the first new run had finished, so interrupting the mistake left
+    neither set of results. Give the new run its own --name, or pass --force,
+    which renames the old rows aside rather than deleting them.
+    """
+    _anchor_data_root()
+    from qroute.benchmark.runner import (BenchmarkConfig, BenchmarkRunner,
+                                         ExistingResults, resolve_workers)
 
     if not Path(config).exists():
         raise _fail(f"configuration {config} does not exist",
@@ -474,16 +716,18 @@ def bench(
     except ValueError as exc:
         raise _fail(str(exc))
     if seeds is not None:
-        cfg.seeds = seeds
+        cfg.seeds = _check_count(seeds, "--seeds")
     if seconds is not None:
-        cfg.max_seconds = seconds
+        cfg.max_seconds = _check_seconds(seconds)
     if out is not None:
         cfg.output_dir = str(out)
     if workers is not None:
-        cfg.workers = workers
+        cfg.workers = _check_count(workers, "--workers")
     if name is not None:
         cfg.name = name
+    cfg.master_seed = _check_seed(cfg.master_seed, "master_seed")
 
+    plan = resolve_workers(cfg.workers)
     n_tasks = len(cfg.instances) * len(cfg.algorithms) * cfg.seeds
     con.print(render.kv_table("benchmark", [
         ("name", cfg.name),
@@ -493,8 +737,26 @@ def bench(
         ("budget per run", render.format_seconds(cfg.max_seconds)),
         ("runs", str(n_tasks)),
         ("serial cost", render.format_seconds(n_tasks * cfg.max_seconds)),
-        ("output", str(Path(cfg.output_dir) / cfg.name)),
+        ("workers", f"{plan.workers} on {plan.cpus} usable cores"),
+        # Absolute, because output_dir in the configuration file is relative to
+        # wherever the command was run from and "results/runs/main" on screen
+        # would not say which one.
+        ("output", str((Path(cfg.output_dir) / cfg.name).resolve())),
     ]))
+    if plan.warning:
+        err.print(f"[yellow]{plan.warning}[/yellow]")
+
+    runner = BenchmarkRunner(cfg, force=force)
+    try:
+        # Asked before the progress bar is on screen, so the refusal is the last
+        # thing printed rather than being followed by an empty "0/8 running".
+        runner.check_output_dir()
+    except ExistingResults as exc:
+        raise _fail(
+            str(exc),
+            f"pick another run with --name, another directory with --out, or pass "
+            f"--force to move {exc.path / 'rows.jsonl'} aside and start again",
+        )
 
     started = time.perf_counter()
     with _progress(transient=False) as progress:
@@ -507,10 +769,13 @@ def bench(
             progress.update(task, completed=event["done"],
                             description=f"{row['instance']} / {row['algorithm']}  {tail}")
 
+        interrupted = False
+        runner.progress = on_progress
         try:
-            result = BenchmarkRunner(cfg, progress=on_progress).run()
+            result = runner.run()
             rows, summary = result["rows"], result["summary"]
             out_dir = Path(result["output_dir"])
+            interrupted = bool(result.get("interrupted"))
         except KeyError:
             # See _summarise: an infinite cost breaks the runner's own summary
             # after every run has already been written to disk. Recover the
@@ -522,6 +787,20 @@ def bench(
             (out_dir / "summary.json").write_text(json.dumps(summary, indent=1))
 
     con.print()
+    if interrupted:
+        err.print(f"[bold yellow]interrupted[/bold yellow] the sweep was stopped after "
+                  f"{len(rows)} of {n_tasks} runs. Everything below covers only those "
+                  f"runs, and they are on disk in {out_dir}.")
+        if not rows:
+            # Nothing finished, so there is nothing to tabulate; empty tables
+            # would only look like a result.
+            err.print("[yellow]no run finished, so there is nothing to report.[/yellow]")
+            raise typer.Exit(code=EXIT_INTERRUPTED)
+    dead = [r for r in rows if r.get("status") == "worker_died"]
+    if dead:
+        err.print(f"[bold yellow]{len(dead)} runs lost their worker process[/bold yellow] "
+                  f"and produced no result; the rest of the sweep continued. They are "
+                  f"listed in the failures table below.")
     if summary.get("degraded"):
         con.print("[yellow]The omnibus test was skipped: at least one run found no "
                   "solution, so the algorithms are not scored on a common set of "
@@ -542,6 +821,10 @@ def bench(
               f"{render.format_seconds(time.perf_counter() - started)}; "
               f"results in [bold]{out_dir}[/bold]")
     con.print(f"[dim]qroute report {out_dir} --plots[/dim]")
+    if interrupted:
+        # A partial sweep is a useful artefact but it is not the run that was
+        # asked for, and a script driving this must be able to tell.
+        raise typer.Exit(code=EXIT_INTERRUPTED)
 
 
 # ---------------------------------------------------------------------------
@@ -556,19 +839,45 @@ def report(
     out: Annotated[Optional[Path], typer.Option("--out",
                    help="Write the markdown or csv output to this file.")] = None,
 ) -> None:
-    """Turn a saved benchmark run into tables, text and figures."""
-    from qroute.benchmark.runner import load_results
+    """Turn a saved benchmark run into tables, text and figures.
+
+    A sweep that was killed leaves a rows file whose last line is half-written.
+    Every intact row is still evidence, so this reads as far as it can and says
+    how many lines it could not parse, rather than refusing to report a thousand
+    good runs because of one bad one. The gzipped rows file that ships with the
+    repository is read directly when the uncompressed one is absent.
+    """
+    from qroute.benchmark.runner import read_rows, resolve_rows_path
 
     result_dir = Path(result_dir)
-    rows_path = result_dir / "rows.jsonl"
+    rows_path = resolve_rows_path(result_dir / "rows.jsonl")
     if not rows_path.exists():
-        raise _fail(f"{rows_path} does not exist",
+        raise _fail(f"{result_dir / 'rows.jsonl'} does not exist",
                     "point this at the directory a `qroute bench` run wrote")
-    rows = load_results(rows_path)
+    rows_file = read_rows(rows_path)
+    rows = rows_file.rows
+    if rows_file.unreadable:
+        first = ", ".join(str(n) for n in rows_file.unreadable[:5])
+        more = "" if len(rows_file.unreadable) <= 5 else ", ..."
+        err.print(f"[yellow]{len(rows_file.unreadable)} of "
+                  f"{len(rows) + len(rows_file.unreadable)} lines in {rows_path.name} "
+                  f"could not be parsed (line{'s' if len(rows_file.unreadable) > 1 else ''} "
+                  f"{first}{more}) and are not included below. This is what an "
+                  f"interrupted sweep leaves behind; the {len(rows)} intact runs are "
+                  f"reported.[/yellow]")
+    if not rows:
+        raise _fail(f"{rows_path} contains no readable runs")
     meta_path = result_dir / "meta.json"
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else None
     summary_path = result_dir / "summary.json"
-    summary = json.loads(summary_path.read_text()) if summary_path.exists() else _summarise(rows)
+    # A stored summary is only quoted when it describes the rows actually read.
+    # Printing a summary computed over runs that are no longer readable, beside
+    # tables built from the ones that are, would put two different populations
+    # on the same screen without saying so.
+    if summary_path.exists() and rows_file.complete:
+        summary = json.loads(summary_path.read_text())
+    else:
+        summary = _summarise(rows)
 
     fmt = fmt.lower()
     if fmt == "table":
@@ -672,6 +981,9 @@ def exact(
     own dual bound. When the time limit intervenes first the command says so and
     prints the surviving gap rather than presenting the incumbent as optimal.
     """
+    _anchor_data_root()
+    seconds = _check_seconds(seconds)
+    workers = _check_count(workers, "--workers")
     inst = _load_instance(instance)
     key = method.strip().lower()
     # The subset dynamic program has no notion of a time limit: it either fits
@@ -681,7 +993,7 @@ def exact(
     con.print(f"[dim]{inst.name}: {inst.n_customers} customers, capacity "
               f"{inst.capacity:g}, {limit}[/dim]")
 
-    with con.status(f"{key} on {inst.name}"):
+    with con.status(f"{key} on {inst.name}"), interruptible(f"{key} on {inst.name}"):
         started = time.perf_counter()
         if key == "cpsat":
             from qroute.exact.cpsat import solve_cvrp_cpsat
@@ -753,13 +1065,20 @@ def instances(
                         help="Only instances that ship a best-known solution.")] = False,
 ) -> None:
     """List the benchmark instances available on this machine."""
-    from qroute.problems.loaders import list_instances, load
+    _anchor_data_root()
+    from qroute.problems.loaders import DATA_ROOT, list_instances, load
 
     available = list_instances()
     wanted = ["cvrp", "vrptw"] if family is None else [family.strip().lower()]
     for f in wanted:
         if f not in available:
             raise _fail(f"unknown family {f!r}", "use cvrp or vrptw")
+    if not any(available.values()):
+        raise _fail(
+            f"no benchmark instances were found under {Path(DATA_ROOT).resolve()}",
+            "that directory should contain benchmarks/cvrplib; set QROUTE_DATA to "
+            "the data directory of a qroute checkout if it lives elsewhere",
+        )
 
     total = sum(len(available[f]) for f in wanted)
     rows_by_family: dict[str, list[dict]] = {f: [] for f in wanted}
@@ -802,16 +1121,22 @@ def instances(
 def _load_network(place: str):
     """Load a GraphML road network and wrap it in a :class:`RoadNetwork`."""
     from qroute.graph.network import RoadNetwork
-    from qroute.graph.osm import list_graphs, load_graph
+    from qroute.graph.osm import OSM_DIR, list_graphs, load_graph
 
     path = Path(place)
     if not path.exists():
         known = list_graphs()
         if place in known:
-            path = Path("data/osm") / f"{place}.graphml"
+            # Resolved against the graph module's own directory rather than a
+            # literal "data/osm", which would only be right when the command was
+            # run from inside the checkout.
+            path = OSM_DIR / f"{place}.graphml"
         else:
-            raise _fail(f"road network {place!r} was not found",
-                        "available: " + (", ".join(known) if known else "none under data/osm"))
+            raise _fail(
+                f"road network {place!r} was not found",
+                ("available: " + ", ".join(known)) if known else
+                f"no road graphs under {OSM_DIR}; run `qroute osm fetch` to build them",
+            )
     graph = load_graph(path)
     return RoadNetwork(graph, name=path.stem)
 
@@ -885,8 +1210,9 @@ def _instance_json(inst) -> dict:
 def osm_fetch(
     network: str = typer.Option("all", "--network", "-n",
                                 help="Which network to rebuild, or 'all'."),
-    out_dir: Path = typer.Option(Path("data/osm"), "--out-dir",
-                                 help="Where the .graphml files are written."),
+    out_dir: Optional[Path] = typer.Option(None, "--out-dir",
+                                           help="Where the .graphml files are written; "
+                                                "the installation's data/osm by default."),
     force: bool = typer.Option(False, "--force",
                                help="Rebuild even if the file already exists."),
 ) -> None:
@@ -898,18 +1224,30 @@ def osm_fetch(
     demonstration. It needs an internet connection and takes roughly a minute
     per network.
     """
+    _anchor_data_root()
+
     import json as _json
 
+    from qroute.graph.osm import OSM_DIR
+
+    # The recipe and the graphs live together, and both are found relative to the
+    # installation rather than to wherever the shell happens to be.
+    out_dir = Path(out_dir) if out_dir is not None else OSM_DIR
     manifest_path = out_dir / "networks.json"
     if not manifest_path.exists():
-        _fail(f"no manifest at {manifest_path}; it records the recipe for each network")
+        # ``_fail`` returns the exception rather than raising it, so a bare call
+        # printed the error and carried straight on into json.loads of a file
+        # that does not exist.
+        raise _fail(f"no manifest at {manifest_path}",
+                    "it records the recipe for each network, and lives beside the graphs")
     manifest = _json.loads(manifest_path.read_text())
     available = manifest["networks"]
 
     wanted = list(available) if network == "all" else [network]
     unknown = [w for w in wanted if w not in available]
     if unknown:
-        _fail(f"unknown network {unknown[0]!r}; available: {', '.join(available)}")
+        raise _fail(f"unknown network {unknown[0]!r}",
+                    f"available: {', '.join(available)}")
 
     import osmnx as ox
 
@@ -970,8 +1308,12 @@ def osm_build(
                        help="Write the solved routes as GeoJSON polylines.")] = None,
 ) -> None:
     """Build a routing instance from a road network, and optionally solve it."""
+    _anchor_data_root()
     from qroute.graph.builder import build_instance, routes_geojson
 
+    seed = _check_seed(seed)
+    seconds = _check_seconds(seconds)
+    customers = _check_count(customers, "--customers", minimum=2)
     with con.status(f"loading {place_file}"):
         network = _load_network(place_file)
     con.print(_network_table(network))
@@ -997,7 +1339,9 @@ def osm_build(
         _write_json(save, _instance_json(inst))
 
     if do_solve:
-        result = _solve_once(algorithm, inst, seconds, seed, {})
+        _warm(algorithm)
+        with interruptible(f"{algorithm} on {inst.name}"):
+            result = _solve_once(algorithm, inst, seconds, seed, {})
         con.print()
         con.print(render.solve_table(result, inst))
         con.print(f"[dim]objective is travel time in seconds; total drive time "
@@ -1039,6 +1383,8 @@ def osm_demo(
     not the much larger and much less honest "cost after the incident against
     cost before it".
     """
+    _anchor_data_root()
+
     from collections import Counter
 
     import numpy as np
@@ -1047,6 +1393,14 @@ def osm_demo(
     from qroute.traffic.events import slowdown
     from qroute.traffic.simulator import TrafficSimulator
 
+    seed = _check_seed(seed)
+    seconds = _check_seconds(seconds)
+    customers = _check_count(customers, "--customers", minimum=2)
+    if reopt_seconds is not None:
+        _check_seconds(reopt_seconds, "--reopt-seconds")
+    if not 0.0 <= hour < 24.0:
+        raise _fail(f"--hour must be in [0, 24), got {hour:g}",
+                    "the traffic simulator reads it as an hour of the day")
     reopt = reopt_seconds if reopt_seconds is not None else max(seconds / 2.0, 1.0)
 
     with con.status(f"loading {network_name}"):
@@ -1073,7 +1427,9 @@ def osm_demo(
 
     # ---- stage 2: the plan for those conditions ----------------------------
     con.print(f"\n[bold]1. planning[/bold] under {hour:g}:00 traffic, {seconds:g} s budget")
-    plan = _solve_once("qpso", inst, seconds, seed, {})
+    _warm("qpso")
+    with interruptible("the demonstration"):
+        plan = _solve_once("qpso", inst, seconds, seed, {})
     con.print(f"   objective {plan.best.cost:,.0f} s, {plan.best.n_routes} routes, "
               f"drive time {render.format_duration_hms(plan.best.stats.duration)}, "
               f"{plan.best.stats.distance / 1000:.2f} km")
@@ -1147,9 +1503,9 @@ def osm_demo(
     warm = np.tile(keys, (5, 1))       # a few particles start from the old plan;
                                        # the rest stay random so the swarm keeps
                                        # the diversity it needs to escape it
-    replan = _solve_once("qpso", inst_after, reopt, seed + 1, {"initial_keys": warm})
-
-    cold = _solve_once("qpso", inst_after, reopt, seed + 1, {})
+    with interruptible("the re-optimisation"):
+        replan = _solve_once("qpso", inst_after, reopt, seed + 1, {"initial_keys": warm})
+        cold = _solve_once("qpso", inst_after, reopt, seed + 1, {})
 
     base = plan.best.cost
     stages = [
@@ -1217,14 +1573,34 @@ def osm_demo(
 # ---------------------------------------------------------------------------
 @app.command()
 def serve(
-    host: Annotated[str, typer.Option("--host", help="Interface to bind.")] = "127.0.0.1",
-    port: Annotated[int, typer.Option("--port", help="Port to bind.")] = 8000,
+    host: Annotated[Optional[str], typer.Option("--host",
+                    help="Interface to bind. Defaults to QROUTE_HOST, then 127.0.0.1.")] = None,
+    port: Annotated[Optional[int], typer.Option("--port",
+                    help="Port to bind. Defaults to QROUTE_PORT, then 8000.")] = None,
     reload: Annotated[bool, typer.Option("--reload/--no-reload",
                       help="Restart on source changes (development only).")] = False,
     app_path: Annotated[Optional[str], typer.Option("--app",
                         help="Import string of the ASGI application.")] = None,
 ) -> None:
     """Start the HTTP API with uvicorn."""
+    # The settings object is the one source of truth for how the service is
+    # configured, so the command line falls back to it rather than carrying its
+    # own defaults. Two entry points that disagree about which port to bind is
+    # exactly the sort of thing that wastes an afternoon on a deployment.
+    try:
+        from qroute.config import settings as _settings
+
+        resolved_settings = _settings()
+        host = host if host is not None else resolved_settings.host
+        port = port if port is not None else resolved_settings.port
+    except Exception:
+        # Configuration problems are reported by the application at startup with
+        # a far better message than this command could produce, so fall back to
+        # the documented defaults and let it speak.
+        host = host if host is not None else "127.0.0.1"
+        port = port if port is not None else 8000
+    if not 1 <= port <= 65535:
+        raise _fail(f"--port must be between 1 and 65535, got {port}")
     try:
         import uvicorn
     except ImportError:
@@ -1274,7 +1650,7 @@ def version() -> None:
             ("platform", platform.platform())]
     for name in ("numpy", "scipy", "numba", "networkx", "ortools", "pyvrp",
                  "osmnx", "vrplib", "fastapi", "uvicorn", "typer", "rich",
-                 "pandas", "matplotlib"):
+                 "matplotlib"):
         rows.append((name, safe(name)))
     con.print(render.kv_table("versions", rows))
 

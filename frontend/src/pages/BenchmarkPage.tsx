@@ -28,20 +28,16 @@
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { ApiError, getBenchmark, getBenchmarks } from '../api/client';
 import type { BenchmarkDetail, BenchmarkSummary } from '../api/types';
+import {
+  CHART_AXIS,
+  CHART_GRID_DASH,
+  CHART_TOOLTIP,
+  ChartFrame,
+  token,
+} from '../components/charts';
 import {
   Badge,
   Caption,
@@ -85,29 +81,6 @@ function plural(count: number, noun: string): string {
   return `${fmtInt(count)} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-/**
- * Chart colours, read from the design tokens at run time.
- *
- * Recharts wants literal colour strings for SVG attributes, and the palette
- * lives in `styles/global.css`, so the tokens are resolved from the document
- * rather than duplicated here. That way a change to a token moves the charts
- * with the rest of the interface and there is no second copy to drift.
- */
-function readChartTheme() {
-  const style = getComputedStyle(document.documentElement);
-  const token = (name: string) => style.getPropertyValue(name).trim();
-  return {
-    axis: token('--border-strong'),
-    grid: token('--border'),
-    tick: token('--text-dim'),
-    label: token('--navy-300'),
-    outline: token('--navy-300'),
-    panel: token('--panel'),
-    text: token('--text'),
-    borderStrong: token('--border-strong'),
-  };
-}
-
 export function BenchmarkPage() {
   const backend = useAppStore((s) => s.backend);
   const [list, setList] = useState<BenchmarkSummary[]>([]);
@@ -116,8 +89,6 @@ export function BenchmarkPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metric, setMetric] = useState<'gap' | 'cost'>('gap');
-
-  const theme = useMemo(readChartTheme, []);
 
   useEffect(() => {
     if (backend !== 'online') return;
@@ -303,24 +274,15 @@ export function BenchmarkPage() {
     return { points, algorithms: [...byAlgorithm.keys()] };
   }, [detail]);
 
-  const tooltipStyle = {
-    background: theme.panel,
-    border: `1px solid ${theme.borderStrong}`,
-    borderRadius: 'var(--radius)',
-    fontSize: 12,
-    color: theme.text,
-    padding: '6px 9px',
-    boxShadow: 'var(--shadow-float)',
-  };
   // Recharts paints a tooltip row in the colour of the series it belongs to.
   // That is fine for the swatch, which is a graphic, but not for the words: the
   // palette contains series pale enough that the name would drop to about
   // 2.3:1 on a white panel, which is unreadable. The mark keeps the hue and the
-  // text is set in ink. The chart key is built in the DOM for the same reason,
-  // plus one Recharts cannot solve: see the note above it.
-  const tooltipItemStyle = { color: theme.text };
-  const axisTick = { fill: theme.tick, fontSize: 11 };
-  const axisLabel = { fill: theme.label, fontSize: 11 };
+  // text is set in ink. This is the one place this page departs from
+  // `CHART_TOOLTIP`, whose charts carry at most three series and can afford to
+  // key the words to the lines. The chart key is built in the DOM for the same
+  // reason, plus one Recharts cannot solve: see the note above it.
+  const tooltipItemStyle = { color: token('--text') };
 
   if (backend !== 'online') {
     return (
@@ -507,70 +469,72 @@ export function BenchmarkPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
               <Panel title="Mean gap by algorithm">
-                <div style={{ width: '100%', height: 220 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={perAlgorithm}
-                      margin={{ top: 8, right: 16, bottom: 30, left: 8 }}
+                <ChartFrame height={220}>
+                  <BarChart
+                    data={perAlgorithm}
+                    margin={{ top: 8, right: 16, bottom: 30, left: 8 }}
+                  >
+                    <CartesianGrid
+                      stroke={token('--border')}
+                      strokeDasharray={CHART_GRID_DASH}
+                      vertical={false}
+                    />
+                    {/*
+                      `interval={0}` forces a label on every bar. Left to its
+                      own devices Recharts drops the ticks it cannot fit
+                      horizontally, and in a two-up panel that meant nine bars
+                      carrying five names - the reader could not tell ga from
+                      pso from qiea from random. Rotating is the cost of
+                      labelling all nine at this width.
+                    */}
+                    <XAxis
+                      dataKey="algorithm"
+                      stroke={CHART_AXIS.stroke}
+                      tick={CHART_AXIS.tick}
+                      interval={0}
+                      angle={-38}
+                      textAnchor="end"
+                      height={48}
+                      tickMargin={2}
+                      label={{
+                        value: 'algorithm',
+                        position: 'insideBottom',
+                        offset: -20,
+                        style: CHART_AXIS.label,
+                      }}
+                    />
+                    <YAxis
+                      stroke={CHART_AXIS.stroke}
+                      tick={CHART_AXIS.tick}
+                      width={58}
+                      tickFormatter={(v: number) => fmt(v, 1)}
+                      label={{
+                        value: 'mean gap (%)',
+                        angle: -90,
+                        position: 'insideLeft',
+                        offset: 6,
+                        style: { ...CHART_AXIS.label, textAnchor: 'middle' },
+                      }}
+                    />
+                    <Tooltip
+                      contentStyle={CHART_TOOLTIP}
+                      itemStyle={tooltipItemStyle}
+                      cursor={{ fill: token('--border'), fillOpacity: 0.5 }}
+                      formatter={(value: unknown) => [`${fmt(Number(value), 3)} %`, 'mean gap']}
+                    />
+                    <Bar
+                      dataKey="meanGap"
+                      isAnimationActive={false}
+                      radius={[2, 2, 0, 0]}
+                      stroke={token('--navy-300')}
+                      strokeWidth={1}
                     >
-                      <CartesianGrid stroke={theme.grid} strokeDasharray="2 4" vertical={false} />
-                      {/*
-                        `interval={0}` forces a label on every bar. Left to its
-                        own devices Recharts drops the ticks it cannot fit
-                        horizontally, and in a two-up panel that meant nine bars
-                        carrying five names - the reader could not tell ga from
-                        pso from qiea from random. Rotating is the cost of
-                        labelling all nine at this width.
-                      */}
-                      <XAxis
-                        dataKey="algorithm"
-                        stroke={theme.axis}
-                        tick={axisTick}
-                        interval={0}
-                        angle={-38}
-                        textAnchor="end"
-                        height={48}
-                        tickMargin={2}
-                        label={{
-                          value: 'algorithm',
-                          position: 'insideBottom',
-                          offset: -20,
-                          style: axisLabel,
-                        }}
-                      />
-                      <YAxis
-                        stroke={theme.axis}
-                        tick={axisTick}
-                        width={58}
-                        tickFormatter={(v: number) => fmt(v, 1)}
-                        label={{
-                          value: 'mean gap (%)',
-                          angle: -90,
-                          position: 'insideLeft',
-                          offset: 6,
-                          style: { ...axisLabel, textAnchor: 'middle' },
-                        }}
-                      />
-                      <Tooltip
-                        contentStyle={tooltipStyle}
-                        itemStyle={tooltipItemStyle}
-                        cursor={{ fill: theme.grid, fillOpacity: 0.5 }}
-                        formatter={(value: unknown) => [`${fmt(Number(value), 3)} %`, 'mean gap']}
-                      />
-                      <Bar
-                        dataKey="meanGap"
-                        isAnimationActive={false}
-                        radius={[2, 2, 0, 0]}
-                        stroke={theme.outline}
-                        strokeWidth={1}
-                      >
-                        {perAlgorithm.map((a) => (
-                          <Cell key={a.algorithm} fill={algorithmColor(a.algorithm)} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                      {perAlgorithm.map((a) => (
+                        <Cell key={a.algorithm} fill={algorithmColor(a.algorithm)} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ChartFrame>
                 <Note>
                   Gap is <code>100 (cost − best known) / best known</code>,
                   averaged over instances after taking the median across seeds.
@@ -620,63 +584,64 @@ export function BenchmarkPage() {
                         </span>
                       ))}
                     </div>
-                    <div style={{ width: '100%', height: 220 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart
-                          data={distribution.points}
-                          margin={{ top: 4, right: 16, bottom: 24, left: 8 }}
-                        >
-                          <CartesianGrid stroke={theme.grid} strokeDasharray="2 4" />
-                          <XAxis
-                            dataKey="gap"
-                            type="number"
-                            stroke={theme.axis}
-                            tick={axisTick}
-                            tickFormatter={(v: number) => fmt(v, 1)}
-                            label={{
-                              value: 'gap to best known (%)',
-                              position: 'insideBottom',
-                              offset: -14,
-                              style: axisLabel,
-                            }}
+                    <ChartFrame height={220}>
+                      <LineChart
+                        data={distribution.points}
+                        margin={{ top: 4, right: 16, bottom: 24, left: 8 }}
+                      >
+                        <CartesianGrid
+                          stroke={token('--border')}
+                          strokeDasharray={CHART_GRID_DASH}
+                        />
+                        <XAxis
+                          dataKey="gap"
+                          type="number"
+                          stroke={CHART_AXIS.stroke}
+                          tick={CHART_AXIS.tick}
+                          tickFormatter={(v: number) => fmt(v, 1)}
+                          label={{
+                            value: 'gap to best known (%)',
+                            position: 'insideBottom',
+                            offset: -14,
+                            style: CHART_AXIS.label,
+                          }}
+                        />
+                        <YAxis
+                          stroke={CHART_AXIS.stroke}
+                          tick={CHART_AXIS.tick}
+                          width={58}
+                          domain={[0, 100]}
+                          tickFormatter={(v: number) => `${fmt(v, 0)}`}
+                          label={{
+                            value: 'runs within gap (%)',
+                            angle: -90,
+                            position: 'insideLeft',
+                            offset: 6,
+                            style: { ...CHART_AXIS.label, textAnchor: 'middle' },
+                          }}
+                        />
+                        <Tooltip
+                          contentStyle={CHART_TOOLTIP}
+                          itemStyle={tooltipItemStyle}
+                          labelFormatter={(v) => `gap ≤ ${fmt(Number(v), 2)} %`}
+                          formatter={(value: unknown, key: unknown) => [
+                            `${fmt(Number(value), 1)} % of runs`,
+                            String(key),
+                          ]}
+                        />
+                        {distribution.algorithms.map((a) => (
+                          <Line
+                            key={a}
+                            type="stepAfter"
+                            dataKey={a}
+                            stroke={algorithmColor(a)}
+                            strokeWidth={2}
+                            dot={false}
+                            isAnimationActive={false}
                           />
-                          <YAxis
-                            stroke={theme.axis}
-                            tick={axisTick}
-                            width={58}
-                            domain={[0, 100]}
-                            tickFormatter={(v: number) => `${fmt(v, 0)}`}
-                            label={{
-                              value: 'runs within gap (%)',
-                              angle: -90,
-                              position: 'insideLeft',
-                              offset: 6,
-                              style: { ...axisLabel, textAnchor: 'middle' },
-                            }}
-                          />
-                          <Tooltip
-                            contentStyle={tooltipStyle}
-                            itemStyle={tooltipItemStyle}
-                            labelFormatter={(v) => `gap ≤ ${fmt(Number(v), 2)} %`}
-                            formatter={(value: unknown, key: unknown) => [
-                              `${fmt(Number(value), 1)} % of runs`,
-                              String(key),
-                            ]}
-                          />
-                          {distribution.algorithms.map((a) => (
-                            <Line
-                              key={a}
-                              type="stepAfter"
-                              dataKey={a}
-                              stroke={algorithmColor(a)}
-                              strokeWidth={2}
-                              dot={false}
-                              isAnimationActive={false}
-                            />
-                          ))}
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
+                        ))}
+                      </LineChart>
+                    </ChartFrame>
                     <Note>
                       Empirical cumulative distribution over every seeded run. A
                       curve further up and to the left reached a small gap on a

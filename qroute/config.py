@@ -20,7 +20,7 @@ every path default is anchored on the *installation* rather than on
 Why a dataclass and not pydantic-settings
 -----------------------------------------
 ``pydantic-settings`` is not installed in this environment, and pulling in a
-dependency to parse eleven environment variables would be a poor trade for a
+dependency to parse thirteen environment variables would be a poor trade for a
 project whose install already takes OR-Tools, osmnx and numba. The parsing here
 is explicit, typed and rejects malformed values loudly (:class:`ConfigError`)
 rather than falling back to a default, which is the only behaviour of
@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import threading
 from dataclasses import dataclass, replace
@@ -184,6 +185,28 @@ def _env_csv(name: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(",") if part.strip())
 
 
+def _env_regex(name: str) -> Optional[str]:
+    """A regular expression from ``name``, rejected here if it will not compile.
+
+    Starlette compiles the CORS origin pattern when the middleware is
+    instantiated, which happens on the first request rather than at start-up. An
+    unbalanced bracket would therefore surface as a ``re.PatternError`` traceback
+    on someone's first page load, naming neither the variable nor the fact that
+    it was a configuration mistake. Compiling it here turns that into the same
+    start-up refusal every other malformed setting gets.
+    """
+    value = _raw(name)
+    if value is None:
+        return None
+    try:
+        re.compile(value)
+    except re.error as exc:
+        raise ConfigError(
+            f"{name}={value!r} is not a valid regular expression: {exc}"
+        ) from None
+    return value
+
+
 # --------------------------------------------------------------------------
 # Path anchoring
 # --------------------------------------------------------------------------
@@ -317,6 +340,16 @@ class Settings:
     max_run_seconds: float = 300.0
 
     # --------------------------------------------------------------- startup
+    # ------------------------------------------------------------- provenance
+    #: Whether :attr:`data_root` came from ``QROUTE_DATA`` rather than from the
+    #: search in :func:`_default_data_root`. Recorded when the settings are built
+    #: instead of re-read later, because
+    #: :meth:`export_to_environment` overwrites ``QROUTE_DATA`` with the resolved
+    #: root - so by the time :meth:`require_data` runs under the API the variable
+    #: is always set, and asking the environment would blame an operator for a
+    #: variable they never touched.
+    data_root_is_explicit: bool = False
+
     #: ``QROUTE_API_PRELOAD`` - which road networks to load into memory at
     #: startup: ``all`` (the default), ``none``, ``first``, or a comma-separated
     #: list of network ids. Loading all three bundled extracts costs about 28
@@ -329,6 +362,7 @@ class Settings:
         """Build the settings from ``os.environ``, raising on a bad value."""
         data_root = _env_path("QROUTE_DATA", _default_data_root())
         return cls(
+            data_root_is_explicit=_raw("QROUTE_DATA") is not None,
             host=_env_str("QROUTE_HOST", cls.host),
             port=_env_int("QROUTE_PORT", cls.port, minimum=1, maximum=65535),
             data_root=data_root,
@@ -341,7 +375,7 @@ class Settings:
             log_format=_env_str("QROUTE_LOG_FORMAT", cls.log_format, allowed=_LOG_FORMATS).lower(),
             request_log=_env_bool("QROUTE_REQUEST_LOG", cls.request_log),
             cors_allow_origins=_env_csv("QROUTE_CORS_ORIGINS"),
-            cors_allow_origin_regex=_raw("QROUTE_CORS_ORIGIN_REGEX"),
+            cors_allow_origin_regex=_env_regex("QROUTE_CORS_ORIGIN_REGEX"),
             max_active_runs=_env_int("QROUTE_MAX_ACTIVE_RUNS", cls.max_active_runs,
                                      minimum=1, maximum=64),
             max_run_seconds=_env_float("QROUTE_MAX_RUN_SECONDS", cls.max_run_seconds,
@@ -381,13 +415,24 @@ class Settings:
         """
         if _looks_like_data_root(self.data_root):
             return
-        tried = "\n  ".join(str(p) for p in _data_root_candidates())
+        # Two different mistakes need two different messages. If QROUTE_DATA was
+        # set, the operator pointed at a specific directory and wants to know
+        # that *that* one is wrong; listing the places we would otherwise have
+        # looked would only suggest we ignored them. If it was not set, the list
+        # of directories actually searched is the whole diagnosis.
+        if self.data_root_is_explicit:
+            where = f"QROUTE_DATA points at {self.data_root}, which is not a qroute data directory."
+        else:
+            tried = "\n  ".join(str(p) for p in _data_root_candidates())
+            where = (
+                f"No qroute data directory was found. Searched:\n  {tried}"
+            )
         raise ConfigError(
-            f"no qroute data directory at {self.data_root}. It must contain "
-            "'benchmarks/' (committed benchmark instances) and, once "
-            "`qroute osm fetch` has been run, 'osm/' (road graphs).\n"
-            f"Directories searched:\n  {tried}\n"
-            "Set QROUTE_DATA to the absolute path of the data directory, for "
+            f"{where}\n"
+            "A data directory contains 'benchmarks/' (the committed benchmark "
+            "instances) and, once `qroute osm fetch` has been run, 'osm/' (the "
+            "road graphs).\n"
+            "Set QROUTE_DATA to the absolute path of that directory, for "
             "example QROUTE_DATA=/srv/qroute/data."
         )
 
@@ -553,10 +598,19 @@ def configure_logging(config: Optional[Settings] = None) -> None:
     root.addHandler(handler)
     root.setLevel(config.log_level)
 
-    # uvicorn installs its own handlers on these three loggers when it starts.
+    # uvicorn installs its own handlers on these loggers when it starts.
     # Clearing them and letting the records propagate to the root handler is
     # what makes *all* output - ours and the server's - come out in one format.
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    for name in ("uvicorn", "uvicorn.error"):
         logger = logging.getLogger(name)
         logger.handlers.clear()
         logger.propagate = True
+
+    # uvicorn's own access log is silenced whenever ours is on, rather than
+    # emitted alongside it. Two lines per request that differ only in wording is
+    # noise, and it is ours that carries the request id and the server-side
+    # duration. With request logging turned off, uvicorn's is let through so the
+    # service is never completely silent about its traffic.
+    access = logging.getLogger("uvicorn.access")
+    access.handlers.clear()
+    access.propagate = not config.request_log

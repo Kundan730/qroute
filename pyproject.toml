@@ -29,7 +29,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.2", "pytest-cov>=5.0", "ruff>=0.5", "httpx>=0.27"]
+dev = ["pytest>=8.2", "ruff>=0.5", "httpx>=0.27"]
+# PyVRP is a reference baseline, not part of the platform. It is kept out of the
+# hard dependencies because it is a compiled package that is slow to install and
+# every path that reaches it is guarded: qroute.baselines.pyvrp_hgs raises
+# PyVRPUnavailable with an install hint rather than quietly substituting another
+# solver. It is declared here because the published benchmark carries a pyvrp
+# column, so anyone reproducing that sweep needs a documented way to install what
+# it actually used instead of guessing a version.
+baselines = ["pyvrp>=0.14"]
 
 [project.scripts]
 qroute = "qroute.cli.main:app"

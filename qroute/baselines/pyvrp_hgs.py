@@ -61,7 +61,8 @@ def _import_pyvrp():
     except Exception as exc:  # pragma: no cover - depends on the environment
         raise PyVRPUnavailable(
             "PyVRP is not available in this environment "
-            f"({type(exc).__name__}: {exc}). Install it with `pip install pyvrp`. "
+            f"({type(exc).__name__}: {exc}). Install it with "
+            "`pip install 'qroute[baselines]'`. "
             "No substitute solver is used in its place."
         ) from exc
 

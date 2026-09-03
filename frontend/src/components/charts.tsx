@@ -168,20 +168,9 @@ function tooltipItemStyle() {
 }
 
 /**
- * Legend voice, kept here so every chart in the platform agrees. Nothing in
- * this file renders a `<Legend>` - both charts name their series in the tooltip
- * instead - but a chart elsewhere that needs one should take these values.
+ * Grid and cursor dash pattern. Shared rather than repeated at each call site,
+ * so the hairlines behind every chart in the platform stay one decision.
  */
-const LEGEND = {
-  get color(): string {
-    return token('--text-dim');
-  },
-  get fontFamily(): string {
-    return token('--font');
-  },
-  fontSize: 11,
-};
-
 const GRID_DASH = '2 4';
 
 /**
@@ -441,4 +430,4 @@ export function DiversityChart({ ticks, height = 150 }: { ticks: RunTick[]; heig
   );
 }
 
-export { AXIS as CHART_AXIS, TOOLTIP_STYLE as CHART_TOOLTIP, LEGEND as CHART_LEGEND };
+export { AXIS as CHART_AXIS, GRID_DASH as CHART_GRID_DASH, TOOLTIP_STYLE as CHART_TOOLTIP };

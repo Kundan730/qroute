@@ -538,10 +538,6 @@ function isGrouped(payload: unknown): boolean {
   return keys.length > 0 && keys.every((k) => Array.isArray(r[k])) && !('items' in r);
 }
 
-export async function getInstance(name: string): Promise<InstanceDetail> {
-  return toInstanceDetail(await request(`/instances/${encodeURIComponent(name)}`));
-}
-
 export async function getNetworks(): Promise<NetworkSummary[]> {
   return listOf(await request('/networks'), 'networks').map(toNetwork);
 }

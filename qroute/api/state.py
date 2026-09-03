@@ -7,9 +7,9 @@ extract takes about nine seconds and roughly a hundred megabytes; building the
 traffic simulator's edge arrays on top of it takes another two. Doing that per
 request is out of the question, so a network is loaded at most once and then
 shared. Loading is lazy, guarded by a lock so two simultaneous first requests do
-not both pay for it, and by default the first bundled network is loaded in a
-background thread at startup so that a demonstration does not begin with a
-nine-second pause.
+not both pay for it, and by default every bundled network is loaded in a
+background thread at startup (``QROUTE_API_PRELOAD``) so that a demonstration
+does not begin with a nine-second pause.
 
 **Generated instances.** ``POST /api/networks/{id}/instance`` produces a routing
 instance from a road graph. The instance itself is small, but the
@@ -31,12 +31,18 @@ edge weights). Every endpoint that reads or writes them does so while holding
 recomputing 34k edge weights takes about two milliseconds. Endpoints run in
 FastAPI's thread pool (they are ``def``, not ``async def``), so a blocking lock
 there does not stall the event loop.
+
+Paths
+-----
+Nothing here builds a path from a relative string. Every directory this module
+reads comes from :func:`qroute.config.settings`, whose defaults are anchored on
+the installed package, so the state behaves identically whichever directory the
+server was started from.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from collections import OrderedDict
@@ -45,6 +51,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
+
+from qroute.config import settings
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from qroute.api.runs import RunRegistry
@@ -245,7 +253,13 @@ class ApiState:
     # ---------------------------------------------------------- networks
     @staticmethod
     def available_network_ids() -> list[str]:
-        """Names of the GraphML road networks bundled under ``data/osm``."""
+        """Names of the GraphML road networks under the configured OSM directory.
+
+        ``qroute.graph.osm`` still computes its own directory from
+        ``QROUTE_DATA``; :meth:`qroute.config.Settings.export_to_environment`,
+        called when :mod:`qroute.api` is imported, is what guarantees that
+        variable holds the resolved absolute root before this import happens.
+        """
         from qroute.graph import osm as osm_mod
 
         return osm_mod.list_graphs()
@@ -357,12 +371,17 @@ class ApiState:
 
     @staticmethod
     def _osm_index() -> dict[str, dict[str, Any]]:
-        """Read ``data/osm/index.json`` if the data component wrote one."""
+        """Read ``<data root>/osm/index.json`` if the data component wrote one.
+
+        The directory comes from the settings rather than from
+        ``qroute.graph.osm.OSM_DIR``, which is a relative path resolved against
+        the working directory at import time. Both name the same place when the
+        server is started from the repository root; only this one still does
+        when it is not.
+        """
         import json
 
-        from qroute.graph.osm import OSM_DIR
-
-        path = Path(OSM_DIR) / "index.json"
+        path = settings().osm_dir / "index.json"
         if not path.exists():
             return {}
         try:
@@ -380,10 +399,10 @@ class ApiState:
     def preload(self, spec: Optional[str] = None) -> None:
         """Load networks named by ``spec`` in the calling thread.
 
-        ``spec`` is read from ``QROUTE_API_PRELOAD`` when omitted: ``none``
-        loads nothing, ``first`` loads only the first bundled graph, an empty or
-        missing value loads them all, and anything else is treated as a
-        comma-separated list of names.
+        ``spec`` comes from :attr:`qroute.config.Settings.preload`
+        (``QROUTE_API_PRELOAD``) when omitted: ``none`` loads nothing, ``first``
+        loads only the first bundled graph, ``all`` or an empty value loads them
+        all, and anything else is treated as a comma-separated list of names.
 
         Loading all three bundled extracts takes about 28 seconds and settles at
         roughly 550 MB resident, measured on the development machine. That is
@@ -392,10 +411,11 @@ class ApiState:
         network list carries real bounding boxes rather than placeholders.
         """
         if spec is None:
-            spec = os.environ.get("QROUTE_API_PRELOAD", "")
+            spec = settings().preload
         spec = spec.strip()
         available = self.available_network_ids()
         if spec.lower() == "none" or not available:
+            log.info("network preload: nothing to do (spec=%r, %d available)", spec, len(available))
             return
         if spec.lower() == "first":
             wanted = available[:1]
@@ -403,6 +423,7 @@ class ApiState:
             wanted = available
         else:
             wanted = [s.strip() for s in spec.split(",") if s.strip()]
+        log.info("network preload: %s from %s", ", ".join(wanted), settings().osm_dir)
         for nid in wanted:
             try:
                 self.get_network(nid)
@@ -515,8 +536,13 @@ class ApiState:
         log.info("warm-up finished in %.2fs (%s)", seconds, detail)
         return self.warmup
 
-    def start_background_startup(self) -> threading.Thread:
-        """Warm up and preload without blocking the server from accepting requests."""
+    def start_background_startup(self, preload: Optional[str] = None) -> threading.Thread:
+        """Warm up and preload without blocking the server from accepting requests.
+
+        ``preload`` is passed down from the application's settings rather than
+        re-read from the environment here, so there is exactly one place that
+        decides what the server loads.
+        """
 
         def _work() -> None:
             self.probe_solvers()
@@ -524,11 +550,15 @@ class ApiState:
             # it costs 0.4 s against their 28 s, and listing instances is what
             # the UI asks for first.
             try:
-                self.benchmark_instances()
+                rows = self.benchmark_instances()
+                log.info(
+                    "benchmark index: %d instances from %s",
+                    len(rows), settings().benchmarks_dir,
+                )
             except Exception:
                 log.exception("benchmark index build failed")
             self.warm_up()
-            self.preload()
+            self.preload(preload)
 
         thread = threading.Thread(target=_work, name="qroute-api-startup", daemon=True)
         thread.start()

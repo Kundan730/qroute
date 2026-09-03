@@ -62,6 +62,7 @@ from qroute.api.runs import (
     warm_start_matrix,
 )
 from qroute.api.schemas import (
+    ErrorResponse,
     AlgorithmInfo,
     BenchmarkDetail,
     BenchmarkSummary,
@@ -74,7 +75,7 @@ from qroute.api.schemas import (
     RunStatus,
 )
 from qroute.api.state import STATE, StoredInstance, instance_detail
-from qroute.config import Settings, configure_logging, settings
+from qroute.config import ConfigError, Settings, configure_logging, settings
 
 log = logging.getLogger("qroute.api")
 
@@ -118,8 +119,14 @@ async def lifespan(app: FastAPI):
     # Refusing to start beats starting and answering every request with an empty
     # list: a judge who runs this from the wrong directory, or an operator whose
     # deployment forgot to ship data/, gets a message naming the directories
-    # that were searched and the variable that fixes it.
-    config.require_data()
+    # that were searched and the variable that fixes it. It is logged as well as
+    # raised, because uvicorn reports a lifespan failure as a traceback and the
+    # useful sentence would otherwise be its last line.
+    try:
+        config.require_data()
+    except ConfigError as exc:
+        log.error("cannot start: %s", exc)
+        raise
     _log_startup_banner(config)
 
     registry = RunRegistry(STATE, max_active=config.max_active_runs)
@@ -154,6 +161,15 @@ def _log_startup_banner(config: Settings) -> None:
     log.info("qroute %s starting", __version__)
     for key, value in config.describe():
         log.info("  %-18s %s", key, value)
+    # Said here rather than in create_app because logging is configured by the
+    # time the lifespan runs, so this reaches the operator's log in the
+    # operator's format. A wildcard is a warning, not a note: it is the one CORS
+    # setting that hands the API to every page in the visitor's browser.
+    if "*" in config.cors_allow_origins:
+        log.warning(
+            "CORS is configured to allow any origin; every page in the "
+            "visitor's browser can start solver runs on this host"
+        )
     if not config.osm_dir.is_dir():
         log.warning(
             "no road graphs under %s; the map and network endpoints will be empty "
@@ -207,6 +223,15 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
             "the command line and the benchmark runner use."
         ),
         lifespan=lifespan,
+        # Declared once for every route so the generated schema tells a client
+        # what a failure looks like. ErrorResponse is the only error shape this
+        # API emits and it never carries a traceback; saying so in the contract
+        # is more useful than leaving a caller to discover it.
+        responses={
+            404: {"model": ErrorResponse, "description": "The named resource does not exist."},
+            422: {"model": ErrorResponse, "description": "The request body failed validation."},
+            500: {"model": ErrorResponse, "description": "Unhandled error; the log holds the detail."},
+        },
     )
 
     # ---------------------------------------------------------------- CORS
@@ -232,12 +257,15 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
     # QROUTE_CORS_ORIGIN_REGEX. Credentials stay off in every configuration:
     # this service has no session to steal, and allowing them would additionally
     # make a wildcard origin illegal.
+    #
+    # What the policy ended up being is reported by the startup banner rather
+    # than from here. This factory runs before the lifespan has configured
+    # logging, so a record emitted at this point either goes nowhere (INFO, with
+    # no handler installed) or reaches stderr through logging's last-resort
+    # handler with no timestamp, no level and no JSON. The wildcard warning in
+    # particular is the last record that should be the one to escape the log
+    # configuration, so it is raised from _log_startup_banner instead.
     if config.cors_enabled:
-        if "*" in config.cors_allow_origins:
-            log.warning(
-                "CORS is configured to allow any origin; every page in the "
-                "visitor's browser can start solver runs on this host"
-            )
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(config.cors_allow_origins),
@@ -245,11 +273,6 @@ def create_app(config: Optional[Settings] = None) -> FastAPI:
             allow_credentials=False,
             allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
             allow_headers=["Content-Type"],
-        )
-        log.info(
-            "CORS enabled for origins=%s regex=%s",
-            list(config.cors_allow_origins) or "(none)",
-            config.cors_allow_origin_regex or "(none)",
         )
 
     _register_request_logging(app, config)
@@ -446,29 +469,32 @@ def _register_routes(app: FastAPI) -> None:
         return instance_detail(_resolve_instance(name))
 
     # -------------------------------------------------------------- runs
-    @app.post("/api/runs", response_model=RunHandle, status_code=201, tags=["runs"])
-    def start_run(request: RunRequest) -> dict[str, str]:
+    @app.post("/api/runs", response_model=RunAccepted, status_code=201, tags=["runs"])
+    def start_run(request: RunRequest) -> dict[str, Any]:
         """Start a solver in its own process and return a handle.
 
-        The response is deliberately just an id: the run has not produced
-        anything yet, and the client is expected to open
-        ``/api/runs/{id}/stream`` or poll ``/api/runs/{id}``.
+        The response body is the run id plus the budget the run was actually
+        given, which is the requested budget clamped to
+        ``QROUTE_MAX_RUN_SECONDS``. Beyond that the run has produced nothing
+        yet, and the client is expected to open ``/api/runs/{id}/stream`` or
+        poll ``/api/runs/{id}``.
         """
         stored = _resolve_instance(request.instance)
         _check_algorithm(request.algorithm)
+        max_seconds, note = _bounded_seconds(request.max_seconds)
         registry = _registry()
         try:
             record = registry.start(
                 stored=stored,
                 algorithm=request.algorithm,
                 seed=request.seed,
-                max_seconds=request.max_seconds,
+                max_seconds=max_seconds,
                 max_iterations=request.max_iterations,
                 params=request.params,
             )
         except TooManyRuns as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from None
-        return {"run_id": record.run_id}
+        return {"run_id": record.run_id, "max_seconds": max_seconds, "clamped": note}
 
     @app.get("/api/runs", response_model=list[RunStatus], tags=["runs"])
     def list_runs(limit: int = Query(20, ge=1, le=200)) -> list[dict[str, Any]]:
@@ -505,9 +531,9 @@ def _register_routes(app: FastAPI) -> None:
         assert record is not None
         return registry.status(record)
 
-    @app.post("/api/runs/{run_id}/reoptimize", response_model=RunHandle,
+    @app.post("/api/runs/{run_id}/reoptimize", response_model=RunAccepted,
               status_code=201, tags=["runs"])
-    def reoptimize(run_id: str, request: ReoptimizeRequest) -> dict[str, str]:
+    def reoptimize(run_id: str, request: ReoptimizeRequest) -> dict[str, Any]:
         """Re-solve after a traffic change, warm-started from the previous plan.
 
         Two things happen, and both are reported rather than assumed. First, if
@@ -551,12 +577,13 @@ def _register_routes(app: FastAPI) -> None:
 
         params = dict(parent.params)
         params.update(request.params)
+        max_seconds, note = _bounded_seconds(request.max_seconds)
         try:
             record = registry.start(
                 stored=stored,
                 algorithm=algorithm,
                 seed=request.seed if request.seed is not None else parent.seed + 1,
-                max_seconds=request.max_seconds,
+                max_seconds=max_seconds,
                 max_iterations=request.max_iterations,
                 params=params,
                 initial_keys=initial_keys,
@@ -565,7 +592,7 @@ def _register_routes(app: FastAPI) -> None:
             )
         except TooManyRuns as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from None
-        return {"run_id": record.run_id}
+        return {"run_id": record.run_id, "max_seconds": max_seconds, "clamped": note}
 
     # -------------------------------------------------------- benchmarks
     @app.get("/api/benchmarks", response_model=list[BenchmarkSummary], tags=["benchmarks"])
@@ -596,8 +623,33 @@ def _register_routes(app: FastAPI) -> None:
 
 def _registry() -> RunRegistry:
     if STATE.runs is None:  # pragma: no cover - only outside the lifespan
-        STATE.runs = RunRegistry(STATE)
+        STATE.runs = RunRegistry(STATE, max_active=settings().max_active_runs)
     return STATE.runs
+
+
+def _bounded_seconds(requested: float) -> tuple[float, Optional[str]]:
+    """Clamp a requested time budget, and produce the sentence that says so.
+
+    A worker is a whole core for the whole budget, and there are only
+    ``max_active_runs`` of them, so an unbounded request from one client is a
+    denial of service against every other. Clamping rather than rejecting is the
+    right response for a demonstration service: the caller still gets a solved
+    instance, and gets told in the same breath that it is not the experiment
+    they asked for. Silently granting a different budget is the one option that
+    is not acceptable, because a time-limited heuristic's result is meaningless
+    without its time limit.
+    """
+    config = settings()
+    granted, was_clamped = config.clamp_run_seconds(float(requested))
+    if not was_clamped:
+        return granted, None
+    note = (
+        f"requested max_seconds={requested:g} exceeds this server's limit of "
+        f"{config.max_run_seconds:g}s per run and was reduced to {granted:g}s "
+        "(configured by QROUTE_MAX_RUN_SECONDS)"
+    )
+    log.info("clamped run budget: %s", note)
+    return granted, note
 
 
 def _resolve_instance(name: str) -> StoredInstance:
@@ -700,11 +752,24 @@ def _refresh_instance_matrices(stored: StoredInstance) -> StoredInstance:
 # --------------------------------------------------------------------------
 
 
+def _results_root() -> Path:
+    """Where the benchmark runner writes, read from the settings on each call.
+
+    Read at call time rather than captured in a module constant so that a test
+    can point the endpoints at a fixture directory with
+    :func:`qroute.config.reload_settings`, and so that the path is the resolved
+    absolute one rather than whatever ``results/runs`` meant in the directory
+    the process happened to start in.
+    """
+    return settings().results_root
+
+
 def _benchmark_dirs() -> list[Path]:
-    if not RESULTS_DIR.is_dir():
+    root = _results_root()
+    if not root.is_dir():
         return []
     return sorted(
-        (p for p in RESULTS_DIR.iterdir() if p.is_dir() and (p / "rows.jsonl").exists()),
+        (p for p in root.iterdir() if p.is_dir() and (p / "rows.jsonl").exists()),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -739,7 +804,7 @@ def _benchmark_index() -> list[dict[str, Any]]:
 
 
 def _benchmark_detail(name: str, *, include_rows: bool, include_curves: bool) -> dict[str, Any]:
-    directory = RESULTS_DIR / name
+    directory = _results_root() / name
     if not (directory.is_dir() and (directory / "rows.jsonl").exists()):
         known = [d.name for d in _benchmark_dirs()]
         raise HTTPException(
@@ -870,11 +935,19 @@ def main() -> None:  # pragma: no cover - convenience entry point
     """Run the server. ``python -m qroute.api.app``."""
     import uvicorn
 
+    config = settings()
+    configure_logging(config)
     uvicorn.run(
         "qroute.api.app:app",
-        host=os.environ.get("QROUTE_HOST", "127.0.0.1"),
-        port=int(os.environ.get("QROUTE_PORT", "8000")),
+        host=config.host,
+        port=config.port,
         reload=False,
+        # uvicorn's own dictConfig would reinstall the handlers configure_logging
+        # just removed, and the access log would then appear twice in two
+        # different formats. Ours is the one that carries the request id and the
+        # duration, so it is the one that stays.
+        log_config=None,
+        access_log=False,
     )
 
 

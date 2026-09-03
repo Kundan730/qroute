@@ -1,0 +1,121 @@
+# Single-host deployment of qroute: one container serving the API and the built
+# front end on port 8000.
+#
+#   docker compose build                      # ~10 min the first time
+#   docker compose --profile setup run --rm osm-fetch   # optional, ~3 min
+#   docker compose up -d
+#   curl -fsS http://127.0.0.1:8000/api/health
+#
+# The road graphs are NOT in the image. They are ~40 MB, they are rebuilt from
+# OpenStreetMap rather than committed, and baking them in at build time would
+# make every build depend on a live Overpass API and produce a different image
+# each time OpenStreetMap is edited. They live in the `osm-graphs` named volume
+# instead: `osm-fetch` fills it once, and every later `up` reuses it. Until it
+# has been run the service starts and works — the benchmark instances, every one
+# of the eleven solvers /api/algorithms lists and the whole /api surface are
+# unaffected — and says so in its log:
+#
+#   WARNING no road graphs under /app/data/osm; the map and network endpoints
+#           will be empty until `qroute osm fetch` has been run
+#
+# `/api/health` reports the same thing as `"networks": 0`. See
+# docs/deployment.md for the full reasoning and the alternatives considered.
+
+services:
+  qroute:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qroute:0.1.0
+    # Bound to the loopback interface on the host. Publishing on 0.0.0.0 puts an
+    # unauthenticated API that will happily spend four cores on a solve onto
+    # every network the host is attached to; that should be a decision someone
+    # makes on purpose, by editing this line or by putting a reverse proxy in
+    # front. See "Exposing it to a network" in docs/deployment.md.
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Road graphs, written by the osm-fetch service below and read by the
+      # API. A named volume rather than a bind mount so that it is owned by
+      # uid 10001 (the image's `qroute` user) from the moment Docker creates it
+      # and populates it from the image, with no chown needed on the host.
+      - osm-graphs:/app/data/osm
+      # Uncomment to run benchmarks inside the container and keep the output on
+      # the host. This SHADOWS the definitive benchmark that ships in the image,
+      # so /api/benchmarks will show whatever is in the host directory instead —
+      # which is the point, but it is worth knowing before it surprises you. The
+      # host directory must be writable by uid 10001.
+      # - ./results/runs:/app/results/runs
+    environment:
+      # Every one of these has a working default; they are listed with their
+      # defaults so that this file is also the documentation of what can be
+      # changed. docs/deployment.md explains each.
+      QROUTE_LOG_LEVEL: INFO
+      # `json` emits one JSON object per line, for a log shipper.
+      QROUTE_LOG_FORMAT: text
+      QROUTE_REQUEST_LOG: "1"
+      # How many solver processes may run at once. Each pins one core, and the
+      # container also has to serve the API. Raise it only alongside the CPU
+      # reservation below.
+      QROUTE_MAX_ACTIVE_RUNS: "4"
+      # The longest budget a single run may occupy a worker for, in seconds.
+      QROUTE_MAX_RUN_SECONDS: "300"
+      # `all` loads every road graph at startup in a background thread: about
+      # 28 s and roughly 550 MB resident for the three bundled extracts, paid
+      # once so that no click during a demonstration waits for a graph to load.
+      # Use `none` on a memory-constrained host — graphs then load on first use.
+      QROUTE_API_PRELOAD: all
+      # Same-origin only by default. Set to a comma-separated origin list if the
+      # front end is served from somewhere other than this container.
+      # QROUTE_CORS_ORIGINS: "https://qroute.example.org"
+    # The server forks a fork-server process, which in turn forks one process
+    # per solver run. Without an init process reaping them, a cancelled run
+    # leaves a zombie, and PID 1 in a container does not reap by default.
+    init: true
+    restart: unless-stopped
+    # The image's own HEALTHCHECK is used as written; it is not repeated here so
+    # that there is one definition of "healthy" rather than two that can drift.
+    stop_grace_period: 20s
+    # Memory only. ~550 MB goes on the three preloaded road graphs, the rest on
+    # the interpreter with NumPy, OR-Tools and numba loaded plus one resident
+    # instance per concurrent run; 4 GB leaves real headroom and 2 GB is enough
+    # with QROUTE_API_PRELOAD=none.
+    #
+    # No CPU limit is set on purpose. QROUTE_MAX_ACTIVE_RUNS above is the real
+    # concurrency control, and it is the honest one: a solver's result is scored
+    # by wall clock, so throttling the container's CPU quota would quietly make
+    # every run worse than the benchmark says it should be. Size the host to at
+    # least QROUTE_MAX_ACTIVE_RUNS + 1 cores instead.
+    mem_limit: 4g
+
+  # One-shot: rebuild the road graphs from OpenStreetMap into the shared volume.
+  #
+  #   docker compose --profile setup run --rm osm-fetch
+  #
+  # Takes about a minute per network and needs outbound internet access. The
+  # recipe is data/osm/networks.json, which is baked into the image, so the
+  # result is reproducible from the manifest rather than from someone's laptop.
+  # It is behind a profile so that `docker compose up` never triggers a network
+  # download; without the profile flag this service does not exist.
+  osm-fetch:
+    profiles: ["setup"]
+    image: qroute:0.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - osm-graphs:/app/data/osm
+    # --out-dir is given explicitly rather than relying on the default being
+    # resolved against WORKDIR, so the command means the same thing however it
+    # is invoked.
+    command: ["qroute", "osm", "fetch", "--out-dir", "/app/data/osm"]
+    restart: "no"
+
+volumes:
+  osm-graphs:
+    # Docker populates a new named volume from the image's /app/data/osm, which
+    # holds networks.json (the fetch recipe) and index.json, and inherits their
+    # uid 10001 ownership. A consequence worth knowing: an existing volume is
+    # NOT refreshed from a newer image, so if networks.json ever changes, run
+    # `docker compose down -v` to discard the volume and start again.
+    name: qroute-osm-graphs

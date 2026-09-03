@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import os
 import re
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -362,10 +361,3 @@ def graph_summary(G: nx.MultiDiGraph) -> dict[str, object]:
         "lanes_tagged": tagged_lanes,
         "classes": dict(sorted(classes.items(), key=lambda kv: -kv[1])),
     }
-
-
-def timed_load(path: str | Path, **kwargs) -> tuple[nx.MultiDiGraph, float]:
-    """Load a graph and report the wall-clock seconds it took."""
-    start = time.perf_counter()
-    G = load_graph(path, **kwargs)
-    return G, time.perf_counter() - start

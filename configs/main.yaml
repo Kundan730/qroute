@@ -25,7 +25,13 @@ seeds: 10
 master_seed: 20260920
 max_seconds: 20.0
 max_iterations: 1000000
-workers: 9
+# workers is deliberately unset. Every run here is scored by wall clock, so a
+# pinned worker count is only correct on the machine it was written for: nine
+# processes on a four-core laptop give each time-budgeted run less than half a
+# core and quietly understate every algorithm. Left unset, the runner asks the
+# host and leaves two cores free. The definitive sweep in results/runs/main used
+# 9 workers on a 10-core machine; meta.json there records it.
+# workers: 9
 save_history: true
 history_stride: 10
 output_dir: results/runs

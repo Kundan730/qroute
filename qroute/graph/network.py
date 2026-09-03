@@ -40,7 +40,6 @@ free flow and 0.5 means the trip takes twice as long as it would at free flow.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -58,15 +57,6 @@ MIN_TRAVEL_TIME_S: float = 1e-6
 #: Mean Earth radius in metres (spherical approximation, good to ~0.5% and far
 #: more accurate than needed at city scale).
 EARTH_RADIUS_M: float = 6_371_008.8
-
-
-@dataclass(frozen=True)
-class EdgeRef:
-    """Identifies one edge of the underlying MultiDiGraph."""
-
-    u: int          # OSM node id of the tail
-    v: int          # OSM node id of the head
-    key: int        # MultiDiGraph parallel-edge key
 
 
 class RoadNetwork:

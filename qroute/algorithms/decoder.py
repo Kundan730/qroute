@@ -141,7 +141,7 @@ class Decoder:
         labels, split_cost = split_tour(tour, self.cost, self.demand, self.capacity,
                                         self.max_routes, self.service, self.tw,
                                         self.vehicle_cost, self.pen_tw)
-        flat, starts, n_routes = labels_to_routes(tour, labels, max(self.max_routes, self.n))
+        flat, starts, n_routes = labels_to_routes(tour, labels)
         if not improve or n_routes == 0:
             cost = self._penalised(flat, starts, n_routes)
             return self._routes(flat, starts, n_routes), cost, None

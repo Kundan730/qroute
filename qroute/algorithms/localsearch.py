@@ -253,11 +253,6 @@ def or_opt_route(route, cost, max_seg, has_tw, symmetric):
 # Inter-route operators
 # --------------------------------------------------------------------------
 @njit(cache=CACHE, fastmath=FASTMATH)
-def _copy_route(flat, starts, r):
-    return flat[starts[r]:starts[r + 1]].copy()
-
-
-@njit(cache=CACHE, fastmath=FASTMATH)
 def _rebuild(routes_flat, routes_starts, n_routes, new_r1, r1, new_r2, r2, n):
     """Return a fresh (flat, starts) with routes r1 and r2 replaced."""
     lens = np.zeros(n_routes, np.int32)

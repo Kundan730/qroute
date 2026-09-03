@@ -202,7 +202,6 @@ def _build(
         k_max = instance.n_customers
     k_max = max(k_max, k_min)
 
-    inf = solver.infinity()
     make_bin = solver.BoolVar if integral else (lambda name: solver.NumVar(0.0, 1.0, name))
 
     x: dict[tuple[int, int], object] = {}

@@ -1,0 +1,78 @@
+# What must never enter the Docker build context.
+#
+# The context is uploaded to the daemon before a single instruction runs, so an
+# unfiltered context here would ship 694 MB of .venv, 131 MB of node_modules and
+# a 43 MB uncompressed benchmark log across a socket on every build (measured on
+# 2026-09-03 with `du -sh`; the whole tree is 972 MB). Everything
+# excluded below is either regenerable inside the image, host-specific, or
+# already present in a form the Dockerfile prefers.
+#
+# This file is a deny list rather than the "ignore everything, then re-include"
+# idiom. A deny list is auditable: each line says what is being kept out and
+# why, and a new source directory is included by default instead of silently
+# vanishing from the image because nobody remembered to re-include it.
+#
+# ONE RULE THAT IS NOT THE .gitignore RULE, and it is the easiest thing in this
+# file to get wrong: a .dockerignore pattern is matched against the whole path
+# from the context root, so a bare `__pycache__/` excludes only a directory of
+# that name at the top level and leaves every nested one in the context. Git
+# treats the same line as "anywhere in the tree". Every pattern below that is
+# meant to apply at any depth therefore carries an explicit `**/`; measured over
+# this tree, forgetting it left 97 stale `.pyc` files (and 3 MB) in the context.
+
+# --- Host-specific build products -----------------------------------------
+# .venv is a macOS/Linux-host virtualenv with absolute paths baked into its
+# scripts and platform-specific wheels; the image builds its own.
+.venv/
+# node_modules is reinstalled from package-lock.json by `npm ci` in the
+# frontend stage, so that the image's dependency tree is the locked one rather
+# than whatever the developer's tree has drifted to.
+frontend/node_modules/
+# frontend/dist is rebuilt in the frontend stage. Copying the host's build
+# would make the image's UI depend on when someone last ran `npm run build`.
+frontend/dist/
+**/*.egg-info/
+build/
+dist/
+
+# --- Caches ----------------------------------------------------------------
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.vite/
+# The osmnx HTTP cache from `qroute osm fetch`; 15 MB of downloaded Overpass
+# responses that only speed up a re-fetch on the machine that made them.
+data/cache/
+
+# --- Large regenerable data ------------------------------------------------
+# The road graphs are ~40 MB and are deliberately NOT baked into the image;
+# see docs/deployment.md for the reasoning and for how they are supplied at
+# run time. data/osm/networks.json and index.json are small and are kept.
+data/osm/*.graphml
+# The definitive benchmark's raw log is 43 MB uncompressed and 4.9 MB gzipped.
+# The Dockerfile copies the .gz and expands it inside the image, so excluding
+# the expanded file here saves 43 MB of context upload without losing anything.
+results/runs/*/rows.jsonl
+
+# --- Version control and tooling -------------------------------------------
+.git/
+.github/
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+.claude/
+.idea/
+.vscode/
+**/.DS_Store
+**/*.log
+**/*.prof
+
+# --- Not needed at run time -------------------------------------------------
+# The test suite runs in CI and in the developer's checkout, not in the
+# production image. Keeping it out avoids shipping pytest fixtures and keeps
+# the image's contents equal to what the service actually executes.
+tests/
+docs/
